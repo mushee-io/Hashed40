@@ -18,7 +18,6 @@ public:
     static constexpr uint8_t STATUS_DRAFT = 0;
     static constexpr uint8_t STATUS_LIVE = 1;
     static constexpr uint8_t STATUS_GRADUATED = 2;
-    static constexpr uint8_t STATUS_CLOSED = 3;
 
     [[eosio::action]]
     void setconfig(name launcher_contract,
@@ -43,9 +42,6 @@ public:
 
     [[eosio::action]]
     void activate(uint64_t market_id);
-
-    [[eosio::action]]
-    void settle(uint64_t market_id);
 
     [[eosio::on_notify("*::transfer")]]
     void ontransfer(name from, name to, asset quantity, string memo);
@@ -112,7 +108,6 @@ private:
     static uint32_t now_seconds();
 
     static asset curve_cost(const market& m, int64_t from_sold, int64_t to_sold);
-    static asset current_price(const market& m);
     static int64_t tokens_for_budget(const market& m, int64_t budget_amount);
     static int64_t fee_amount(int64_t amount, uint16_t fee_bps);
 
