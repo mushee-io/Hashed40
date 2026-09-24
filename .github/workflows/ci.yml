@@ -26,6 +26,15 @@ jobs:
       - name: Compile and test on Ultra local chain
         run: bash scripts/test_ultra.sh
 
+      - name: Upload Hashed40 contract artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hashed40-ultra-contract
+          path: |
+            contract/build/hashedpad.wasm
+            contract/build/hashedpad.abi
+          if-no-files-found: error
+
   web:
     name: Web launcher build
     runs-on: ubuntu-latest
