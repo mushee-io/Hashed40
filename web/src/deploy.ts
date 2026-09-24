@@ -225,34 +225,72 @@ async function configureLaunchpad() {
   return result.data.transactionHash;
 }
 
+type ConfigRow = {
+  launcher_contract: string;
+  payment_contract: string;
+  payment_symbol: string;
+  fee_receiver: string;
+  fee_bps: number;
+};
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function readConfigRowWithRetry() {
+  let lastError = 'No config row returned yet.';
+
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    for (const endpoint of RPC_ENDPOINTS) {
+      try {
+        const response = await fetch(`${endpoint}/v1/chain/get_table_rows`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            json: true,
+            code: TARGET,
+            scope: TARGET,
+            table: 'config',
+            limit: 10,
+          }),
+        });
+
+        const text = await response.text();
+        if (!response.ok) {
+          lastError = `${endpoint}: ${response.status} ${text.slice(0, 240)}`;
+          continue;
+        }
+
+        const parsed = JSON.parse(text) as { rows?: ConfigRow[] };
+        const row = parsed.rows?.[0];
+        if (row) return row;
+
+        lastError = `${endpoint}: config table is visible but still empty`;
+      } catch (err) {
+        lastError = `${endpoint}: ${messageOf(err)}`;
+      }
+    }
+
+    await sleep(1500);
+  }
+
+  throw new Error(`Hash40 config has not propagated to the Testnet RPCs yet. ${lastError}`);
+}
+
 async function verifySetup() {
-  const [info, config] = await Promise.all([
-    rpc<{
-      permissions: Array<{ perm_name: string; required_auth: Authority }>;
-    }>('/v1/chain/get_account', { account_name: TARGET }),
-    rpc<{ rows: Array<{
-      launcher_contract: string;
-      payment_contract: string;
-      payment_symbol: string;
-      fee_receiver: string;
-      fee_bps: number;
-    }> }>('/v1/chain/get_table_rows', {
-      json: true,
-      code: TARGET,
-      scope: TARGET,
-      table: 'config',
-      limit: 1,
-    }),
-  ]);
+  const info = await rpc<{
+    permissions: Array<{ perm_name: string; required_auth: Authority }>;
+  }>('/v1/chain/get_account', { account_name: TARGET });
 
   const active = info.permissions.find((permission) => permission.perm_name === 'active');
   const hasCode = active?.required_auth.accounts.some(
     (entry) => entry.permission.actor === TARGET && entry.permission.permission === 'eosio.code',
   );
-  const row = config.rows[0];
 
   if (!hasCode) throw new Error('eosio.code permission was not found after setup.');
-  if (!row) throw new Error('Hash40 config row was not found after setup.');
+
+  const row = await readConfigRowWithRetry();
+
   if (row.launcher_contract !== TOKEN_FACTORY) throw new Error('HashTL token factory is not configured correctly.');
   if (row.payment_contract !== PAYMENT_CONTRACT) throw new Error('UOS payment contract is not configured correctly.');
   if (row.payment_symbol !== PAYMENT_SYMBOL) throw new Error('UOS payment symbol is not configured correctly.');
