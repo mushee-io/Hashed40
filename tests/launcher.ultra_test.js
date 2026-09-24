@@ -117,6 +117,36 @@ module.exports = class test {
                 assert(stats.rows[0].supply === '500100.00000000 HASH', 'supply did not increase after issue');
             },
 
+            'permanently locks minting': async () => {
+                const result = await common.pushAction(
+                    'hashedlaunch',
+                    'lockmint',
+                    'hashcreator@active',
+                    ['hashcreator', 'HASH'],
+                );
+
+                assert(result, 'lockmint transaction failed');
+
+                const stats = await common.getTable('hashedlaunch', 'HASH', 'stat');
+                assert(stats.rows[0].mint_locked === true, 'HASH minting was not locked');
+
+                await common.transactAssert(
+                    [
+                        {
+                            account: 'hashedlaunch',
+                            name: 'issue',
+                            authorization: [{ actor: 'hashcreator', permission: 'active' }],
+                            data: {
+                                to: 'hashcreator',
+                                quantity: '1.00000000 HASH',
+                                memo: 'should fail after lock',
+                            },
+                        },
+                    ],
+                    'minting is permanently locked for this token',
+                );
+            },
+
             'burns issuer-held HASH and reduces supply': async () => {
                 const result = await common.pushAction(
                     'hashedlaunch',
