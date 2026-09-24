@@ -1,27 +1,47 @@
+const path = require('path');
+
 module.exports = class test {
     requiresSystemContracts() {
-        // The launcher itself does not depend on Ultra's system contract.
-        // Keeping this test systemless avoids coupling contract correctness to
-        // the current precompiled eosio.system bundle in the dev image.
+        // Hashed's token contract itself does not depend on eosio.system.
+        // We use the systemless UltraTest snapshot and create accounts with the
+        // chain-native newaccount action, which isolates our contract from the
+        // currently mismatched precompiled eosio.system bundle in the image.
         return false;
     }
 
-    importContracts() {
-        return [
-            {
-                account: 'hashedlaunch',
-                path: '../contract/build',
-                contract: 'hashedlaunch',
-            },
-        ];
-    }
-
-    requiredAccounts() {
-        return ['hashcreator', 'receiveracct'];
-    }
-
-    tests({ assert, common }) {
+    tests({ assert, common, cleos, keychain }) {
         return {
+            'bootstraps local accounts and deploys hashedlaunch': async () => {
+                const accounts = ['hashedlaunch', 'hashcreator', 'receiveracct'];
+
+                for (const account of accounts) {
+                    const publicKey = await keychain.generateAndReturnPublicKey(account);
+                    assert(publicKey, `could not generate key for ${account}`);
+
+                    const created = await cleos(
+                        `create account eosio ${account} ${publicKey} ${publicKey}`,
+                        { swallow: false, fetch: false },
+                    );
+                    assert(created, `could not create local account ${account}`);
+                }
+
+                const buildDir = path.resolve(__dirname, '../contract/build');
+                const deployed = await cleos(
+                    `set contract hashedlaunch "${buildDir}" hashedlaunch.wasm hashedlaunch.abi -p hashedlaunch@active`,
+                    { swallow: false, fetch: false },
+                );
+
+                assert(deployed, 'hashedlaunch contract deployment failed');
+
+                const contractAccount = await common.getAccount('hashedlaunch');
+                const creatorAccount = await common.getAccount('hashcreator');
+                const receiverAccount = await common.getAccount('receiveracct');
+
+                assert(contractAccount, 'hashedlaunch account does not exist');
+                assert(creatorAccount, 'hashcreator account does not exist');
+                assert(receiverAccount, 'receiveracct account does not exist');
+            },
+
             'launches HASH with an initial supply': async () => {
                 const result = await common.pushAction(
                     'hashedlaunch',
