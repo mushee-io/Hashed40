@@ -1,102 +1,164 @@
-# Hashed — Ultra Native Token Launcher MVP
+# Hashed — Ultra Native Token Launcher
 
-A native Ultra / Antelope fungible-token launcher designed for **Ultra Testnet** and Ultra's local `ultratest` environment.
+Hashed is a native Ultra / Antelope fungible-token launcher. The current MVP creates tokens, issues supply, transfers balances, burns supply, stores metadata, and includes an Ultra Wallet Testnet frontend.
 
-## What is included
+## Current scope
 
-- `contract/` — C++ WASM smart contract implementing a permissionless multi-token launcher.
-- `web/` — Vite + TypeScript launcher UI using the official `@ultraos/wallet-sdk`.
-- `scripts/local_test.sh` — one-click CLI smoke test after local deployment.
+- Native Ultra C++ / WASM smart contract
+- One-transaction `launch` action
+- Configurable symbol, precision, maximum supply, and initial supply
+- Issuer-controlled minting
+- Burning with `retire`
+- Standard token transfers
+- Token metadata
+- Ultra Wallet SDK Testnet frontend
+- Local Ultra integration tests using `ultratest`
 
-## MVP contract actions
+## Contract actions
 
-| Action | Purpose | Required auth |
+| Action | Purpose | Authorization |
 |---|---|---|
-| `launch` | Create token + issue initial supply atomically | issuer |
-| `create` | Create token without minting | issuer |
-| `issue` | Mint additional supply up to max | token issuer |
+| `launch` | Create a token and optionally mint its initial supply atomically | issuer |
+| `create` | Create a token without minting | issuer |
+| `issue` | Mint additional supply up to the maximum | token issuer |
 | `retire` | Burn issuer-held supply | token issuer |
-| `transfer` | Standard fungible-token transfer | sender |
-| `open` / `close` | Manage zero-balance rows | RAM payer / owner |
-| `setmeta` | Update name / metadata URI | token issuer |
+| `transfer` | Transfer tokens | sender |
+| `open` | Open a zero-balance row | RAM payer |
+| `close` | Remove an empty balance row | owner |
+| `setmeta` | Update token name / metadata URI | token issuer |
 
-Each token is identified by **contract account + symbol**, exactly like Antelope-style fungible tokens. The issuer remains in control of minting; the launcher contract does not have an admin mint path.
+A token is identified by **launcher contract + symbol**, following the Antelope token model.
 
-## Important architecture note
+## Architecture
 
-Ultra's deployed `eosio.token::create` requires authorization from the token contract itself. This launcher therefore deploys a **separate eosio.token-style contract** under your own account and changes creation authorization so the token issuer can create tokens through the launcher. It does not modify Ultra's system `eosio.token` contract.
+Ultra's deployed system `eosio.token` contract is not being modified. Hashed deploys its own eosio.token-style contract and allows the token issuer to authorize token creation through that contract.
 
-## 1. Run Ultra locally
+The launcher enforces:
 
-Ultra's official developer Docker image includes `ultratest`, `cleos` and CDT tooling. Inside that environment start a local chain:
+- maximum supply
+- symbol/precision consistency
+- issuer-only minting
+- positive transfer quantities
+- issuer-only metadata updates
+- one token per symbol under the launcher contract
+
+## Fastest local test
+
+Ultra's official developer image contains `cdt-cpp`, `cleos`, `nodeos`, `keosd`, and `ultratest`.
+
+### 1. Clone into your Ultra work directory
+
+Linux / WSL:
+
+```bash
+mkdir -p ~/ultra_workdir
+cd ~/ultra_workdir
+git clone https://github.com/mushee-io/Hashed40.git
+cd Hashed40
+```
+
+### 2. Pull and start Ultra's developer container
+
+```bash
+docker pull quay.io/ultra.io/3rdparty-devtools:latest
+```
+
+If you do not already have the `ultra` container:
+
+```bash
+docker run -dit \
+  --name ultra \
+  -p 8888:8888 \
+  -p 9876:9876 \
+  -v ~/ultra_workdir:/opt/ultra_workdir \
+  quay.io/ultra.io/3rdparty-devtools:latest
+```
+
+Enter it:
+
+```bash
+docker start ultra
+docker exec -it ultra /bin/bash
+```
+
+### 3. Compile + run the complete token test
+
+Inside the Ultra container:
+
+```bash
+cd /opt/ultra_workdir/Hashed40
+bash scripts/test_ultra.sh
+```
+
+That script:
+
+1. compiles `hashedlaunch.cpp` with Ultra's `cdt-cpp`
+2. generates `hashedlaunch.wasm`
+3. generates `hashedlaunch.abi`
+4. boots an Ultra test environment with `ultratest`
+5. deploys the contract
+6. creates `HASH`
+7. mints `500,000 HASH`
+8. transfers `25 HASH`
+9. issues additional supply
+10. burns supply
+11. verifies duplicate-symbol protection
+
+A successful run ends with:
+
+```text
+PASS: create -> mint -> transfer -> burn -> duplicate-symbol protection
+```
+
+## Compile only
+
+Inside Ultra's developer container:
+
+```bash
+cd /opt/ultra_workdir/Hashed40
+bash scripts/compile_ultra.sh
+```
+
+Artifacts are written to:
+
+```text
+contract/build/hashedlaunch.wasm
+contract/build/hashedlaunch.abi
+```
+
+## Manual local deployment
+
+If you want a persistent local chain instead of the automated test runner:
 
 ```bash
 ultratest -D -n -s
 ```
 
-Verify:
+In another shell inside the container:
 
 ```bash
 cleos get info
 ```
 
-## 2. Create deployment and creator accounts
-
-Generate a key and import it into the local wallet:
+Create/import a local key and create the deployment accounts as needed, then deploy:
 
 ```bash
-cleos create key --to-console
-cleos wallet import --private-key YOUR_PRIVATE_KEY
+cleos set contract hashedlaunch \
+  /opt/ultra_workdir/Hashed40/contract/build \
+  hashedlaunch.wasm \
+  hashedlaunch.abi \
+  -p hashedlaunch@active
 ```
 
-Create the contract account and creator account with the generated public key:
+If the local environment reports that the deployment account has no KYC info, Ultra's local-development documentation provides:
 
 ```bash
-cleos system newaccount --gift-ram-kbytes 512 eosio hashedlaunch YOUR_PUBLIC_KEY YOUR_PUBLIC_KEY
-cleos system newaccount --gift-ram-kbytes 256 eosio hashcreator YOUR_PUBLIC_KEY YOUR_PUBLIC_KEY
+cleos push action eosio.kyc togglekyc '[]' -p ultra.kyc
 ```
 
-> Keep the private key local. Never paste it into Discord, GitHub, or the launcher frontend.
+Then retry deployment.
 
-## 3. Compile
-
-From the Ultra dev container, with this project mounted under `/opt/ultra_workdir/hashed-ultra-token-launcher`:
-
-```bash
-cd /opt/ultra_workdir/hashed-ultra-token-launcher/contract
-mkdir -p build
-cd build
-cmake ..
-make
-```
-
-You should get `hashedlaunch.wasm` and `hashedlaunch.abi` in the build directory.
-
-For a direct CDT compile, this is also suitable:
-
-```bash
-cdt-cpp -abigen \
-  -I ../include \
-  -contract hashedlaunch \
-  -o hashedlaunch.wasm \
-  ../src/hashedlaunch.cpp
-```
-
-## 4. Deploy locally
-
-From the build folder:
-
-```bash
-cleos set contract hashedlaunch . hashedlaunch.wasm hashedlaunch.abi -p hashedlaunch@active
-```
-
-Check the ABI:
-
-```bash
-cleos get abi hashedlaunch
-```
-
-## 5. Launch the first token
+## Launch HASH manually
 
 ```bash
 cleos push action hashedlaunch launch \
@@ -104,22 +166,14 @@ cleos push action hashedlaunch launch \
 -p hashcreator@active
 ```
 
-Check supply and balance:
+Verify:
 
 ```bash
 cleos get currency stats hashedlaunch HASH
 cleos get currency balance hashedlaunch hashcreator HASH
 ```
 
-Expected initial balance:
-
-```text
-500000.00000000 HASH
-```
-
-## 6. Transfer the token
-
-Create another local account, then:
+Transfer:
 
 ```bash
 cleos push action hashedlaunch transfer \
@@ -127,9 +181,11 @@ cleos push action hashedlaunch transfer \
 -p hashcreator@active
 ```
 
-## 7. Web launcher
+## Web launcher
 
-The web launcher targets **Ultra Testnet** and uses the Ultra Wallet **browser extension** (Ultra's Web Wallet does not support Testnet).
+The frontend uses `@ultraos/wallet-sdk@^0.6.1` and targets **Ultra Testnet**.
+
+Ultra's browser extension only injects its wallet API into HTTPS pages. The project therefore uses `@vitejs/plugin-basic-ssl` so local development runs over HTTPS.
 
 ```bash
 cd web
@@ -138,29 +194,66 @@ npm install
 npm run dev
 ```
 
-Set `VITE_CONTRACT_ACCOUNT` to the Testnet account where the contract is eventually deployed.
+Open the HTTPS URL printed by Vite and accept the local development certificate warning.
 
-For local Ultra-chain testing, use `cleos` first. Once Ultra's public Testnet account/faucet access is restored, deploy the same contract to Testnet and use the web interface.
+Set:
 
-## Security decisions in this MVP
+```env
+VITE_CONTRACT_ACCOUNT=<your Ultra Testnet contract account>
+```
 
-- Token creation requires the issuer's signature.
-- Only the recorded issuer can mint new supply.
-- Maximum supply cannot be exceeded.
-- A symbol can only exist once under this launcher contract.
-- Creator/issuer pays token state RAM; sender pays RAM for a new recipient balance row.
-- No contract-admin mint function.
-- Token metadata updates require issuer authorization.
+before using the public Testnet build.
 
-## Before Mainnet
+The frontend deliberately uses string/BigInt amount parsing rather than JavaScript floating-point arithmetic, so large token supplies and fixed precision are not silently rounded.
 
-This is an MVP, not an audited production token factory. Before Mainnet:
+## Public Ultra Testnet
 
-1. Independent smart-contract audit.
-2. Property/fuzz testing for token accounting invariants.
-3. Decide whether launches should share a single contract or deploy isolated contracts per project.
-4. Add creation fees / anti-symbol-squatting rules if desired.
-5. Add token logo/metadata schema and indexer.
-6. Add vesting/locker contracts.
-7. Add launch-sale and liquidity-bootstrap contracts.
-8. Integrate the Hashed DEX router/pool contracts.
+Once a funded Ultra developer Testnet account is available:
+
+1. compile the WASM/ABI
+2. deploy both artifacts to the generated Ultra developer account
+3. set `VITE_CONTRACT_ACCOUNT` to that account
+4. connect the Ultra Wallet extension on Testnet
+5. launch a test token
+6. verify the transaction and token tables on the Ultra Testnet explorer
+
+Ultra developer account names on Testnet/Mainnet are generated by Ultra; do not assume the deployment account will literally be named `hashedlaunch`.
+
+## Security status
+
+This is an MVP and is **not audited for Mainnet**.
+
+Before Mainnet:
+
+1. independent smart-contract audit
+2. fuzz/property tests for supply and balance invariants
+3. launch fee / anti-spam policy
+4. production RAM/resource sponsorship model
+5. token metadata/indexing standard
+6. vesting and LP-lock contracts
+7. launch-sale and liquidity-bootstrap contracts
+8. Hashed DEX integration
+9. lending only after reliable liquidity/oracle architecture exists
+
+## Repository structure
+
+```text
+contract/
+  CMakeLists.txt
+  include/hashedlaunch/hashedlaunch.hpp
+  src/hashedlaunch.cpp
+
+scripts/
+  compile_ultra.sh
+  local_test.sh
+  test_ultra.sh
+
+tests/
+  launcher.ultra_test.js
+
+web/
+  src/main.ts
+  src/style.css
+  vite.config.ts
+  package.json
+```
