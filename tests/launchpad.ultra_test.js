@@ -157,7 +157,7 @@ module.exports = class test {
                 );
 
                 const stats = await common.getTable('hashedlaunch', 'MEME', 'stat');
-                assert(stats.rows[0].mint_locked === true, 'MEME supply is not mint locked');
+                assert(Boolean(stats.rows[0].mint_locked), 'MEME supply is not mint locked');
                 assert(
                     stats.rows[0].supply === '1000000.00000000 MEME',
                     'MEME full supply was not issued',
@@ -259,7 +259,7 @@ module.exports = class test {
                 const launches = await common.getTable('hashedpad', 'hashedpad', 'launches');
                 const launch = launches.rows[0];
 
-                assert(launch.graduated === true, 'meme launch did not reach graduation');
+                assert(Boolean(launch.graduated), 'meme launch did not reach graduation');
                 assert(
                     Number(launch.payment_reserve.split(' ')[0]) >= 200,
                     'graduation reserve target was not reached',
@@ -284,7 +284,7 @@ module.exports = class test {
                 const launch = launches.rows[0];
 
                 assert(launch.trade_count === 3, 'sell trade was not counted');
-                assert(launch.graduated === true, 'graduation flag should be permanent');
+                assert(Boolean(launch.graduated), 'graduation flag should be permanent');
 
                 const trades = await common.getTable('hashedpad', '1', 'trades');
                 assert(trades.rows.length === 3, 'recent trade history was not recorded');
