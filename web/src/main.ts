@@ -16,6 +16,14 @@ const ULTRA_MAINNET_CHAIN_ID =
 const ULTRA_TESTNET_CHAIN_ID =
   '7fc56be645bb76ab9d747b53089f132dcb7681db06f0852cfa03eaf6f7ac80e9';
 
+// Protocol defaults stay hidden from the meme creator.
+const TOKEN_DECIMALS = 8;
+const TOTAL_SUPPLY = '1000000000';
+const CURVE_ALLOCATION = '1000000000';
+const START_PRICE = '0.000001';
+const END_PRICE = '0.000010';
+const GRADUATION_TARGET = '5000';
+
 const wallet = new UltraWalletSDK({ environment: 'testnet', provider: 'extension' });
 let account: string | undefined;
 let selectedMarket: MarketRow | undefined;
@@ -69,7 +77,10 @@ app.innerHTML = `
         <button class="nav-chip" data-filter-jump="graduating">Graduating</button>
       </div>
 
-      <button id="connect" class="wallet">Connect Ultra Wallet</button>
+      <div class="top-actions">
+        <button id="create-meme" class="create-trigger">+ Create meme</button>
+        <button id="connect" class="wallet">Connect Ultra Wallet</button>
+      </div>
     </nav>
 
     <header class="hero">
@@ -77,6 +88,10 @@ app.innerHTML = `
         <div class="eyebrow">ULTRA MEME MARKET</div>
         <h1>Trade memes.<br/><span>On Ultra.</span></h1>
         <p>Discover live meme coins, buy and sell with UOS, and watch the bonding curve move in real time.</p>
+        <div class="hero-actions">
+          <button id="hero-create" class="create-trigger hero-create">Create a meme</button>
+          <button class="hero-market-link" data-filter-jump="trending">Browse trending</button>
+        </div>
       </div>
 
       <div class="hero-stats">
@@ -195,6 +210,71 @@ app.innerHTML = `
       </div>
     </section>
 
+    <div id="create-modal" class="modal-backdrop hidden" aria-hidden="true">
+      <section class="create-modal" role="dialog" aria-modal="true" aria-labelledby="create-title">
+        <div class="create-modal-head">
+          <div>
+            <span class="kicker">CREATE MEME</span>
+            <h2 id="create-title">Launch it on Ultra.</h2>
+            <p>Name it, meme it, send it. Hashed40 handles the token and bonding curve.</p>
+          </div>
+          <button id="close-create" class="modal-close" type="button" aria-label="Close">×</button>
+        </div>
+
+        <form id="create-form" class="create-form">
+          <div class="create-image-row">
+            <div id="create-image-preview" class="create-image-preview">#</div>
+            <label>Meme image URL
+              <input id="create-image" maxlength="256" placeholder="https://... or ipfs://..." />
+              <small>Square images work best.</small>
+            </label>
+          </div>
+
+          <div class="create-grid">
+            <label>Name
+              <input id="create-name" maxlength="64" placeholder="Purple Wojak" required />
+            </label>
+            <label>Ticker
+              <input id="create-symbol" maxlength="7" placeholder="MOJAK" pattern="[A-Za-z]{1,7}" required />
+            </label>
+          </div>
+
+          <label>Description
+            <textarea id="create-description" maxlength="512" placeholder="What is this meme about?"></textarea>
+          </label>
+
+          <details class="create-links">
+            <summary>Add links <span>optional</span></summary>
+            <div class="create-grid links-grid">
+              <label>Website
+                <input id="create-website" maxlength="256" placeholder="https://..." />
+              </label>
+              <label>X
+                <input id="create-x" maxlength="256" placeholder="https://x.com/..." />
+              </label>
+              <label>Telegram
+                <input id="create-telegram" maxlength="256" placeholder="https://t.me/..." />
+              </label>
+            </div>
+          </details>
+
+          <label>Initial buy <span>optional</span>
+            <div class="asset-input create-buy-input">
+              <input id="create-initial-buy" inputmode="decimal" value="0" />
+              <span>${PAYMENT_SYMBOL}</span>
+            </div>
+          </label>
+
+          <div class="create-note">
+            Your wallet will approve the launch steps. Supply, pricing and curve settings are handled by Hashed40.
+          </div>
+
+          <button id="create-submit" class="create-submit" type="submit" disabled>Connect wallet to create</button>
+          <div id="create-status" class="status"></div>
+        </form>
+      </section>
+    </div>
+
     <footer>
       <strong>HASHED40</strong>
       <span>Meme trading on Ultra · Testnet</span>
@@ -205,6 +285,10 @@ app.innerHTML = `
 const connectButton = document.querySelector<HTMLButtonElement>('#connect')!;
 const buyButton = document.querySelector<HTMLButtonElement>('#buy-button')!;
 const sellButton = document.querySelector<HTMLButtonElement>('#sell-button')!;
+const createButton = document.querySelector<HTMLButtonElement>('#create-meme')!;
+const heroCreateButton = document.querySelector<HTMLButtonElement>('#hero-create')!;
+const createSubmit = document.querySelector<HTMLButtonElement>('#create-submit')!;
+const createModal = document.querySelector<HTMLElement>('#create-modal')!;
 
 function showStatus(target: HTMLElement, message: string, kind: StatusKind = 'info') {
   target.className = `status ${kind}`;
@@ -239,6 +323,10 @@ function escapeHtml(value: string): string {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;');
+}
+
+function utf8Length(value: string): number {
+  return new TextEncoder().encode(value).length;
 }
 
 function formatAmount(raw: string, decimals: number, symbol: string): string {
@@ -299,6 +387,9 @@ function setTradeEnabled() {
     buyButton.textContent = account ? 'Buy meme' : 'Connect wallet to buy';
     sellButton.textContent = account ? 'Sell meme' : 'Connect wallet to sell';
   }
+
+  createSubmit.disabled = !account;
+  createSubmit.textContent = account ? 'Launch meme' : 'Connect wallet to create';
 }
 
 async function sign(contract: string, action: string, data: Record<string, unknown>): Promise<string> {
@@ -323,6 +414,25 @@ async function fetchMarkets(): Promise<MarketRow[]> {
   if (!response.ok) throw new Error(`Ultra RPC returned ${response.status}.`);
   const payload = (await response.json()) as { rows?: MarketRow[] };
   return payload.rows ?? [];
+}
+
+async function waitForMarket(creator: string, symbol: string): Promise<MarketRow> {
+  for (let attempt = 0; attempt < 15; attempt += 1) {
+    const markets = await fetchMarkets();
+    const match = markets
+      .filter(
+        (market) =>
+          market.creator === creator &&
+          symbolCode(market.token_symbol) === symbol &&
+          market.status === 0,
+      )
+      .sort((a, b) => Number(b.id) - Number(a.id))[0];
+
+    if (match) return match;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+
+  throw new Error('The meme token was created, but its market has not appeared yet. Refresh in a moment.');
 }
 
 function progress(market: MarketRow): number {
@@ -597,6 +707,148 @@ sellButton.addEventListener('click', async () => {
     showStatus(target, errorMessage(err), 'error');
   } finally {
     setTradeEnabled();
+  }
+});
+
+function openCreateModal() {
+  createModal.classList.remove('hidden');
+  createModal.setAttribute('aria-hidden', 'false');
+  document.body.classList.add('modal-open');
+  document.querySelector<HTMLInputElement>('#create-name')!.focus();
+}
+
+function closeCreateModal() {
+  createModal.classList.add('hidden');
+  createModal.setAttribute('aria-hidden', 'true');
+  document.body.classList.remove('modal-open');
+}
+
+createButton.addEventListener('click', openCreateModal);
+heroCreateButton.addEventListener('click', openCreateModal);
+document.querySelector<HTMLButtonElement>('#close-create')!.addEventListener('click', closeCreateModal);
+
+createModal.addEventListener('click', (event) => {
+  if (event.target === createModal) closeCreateModal();
+});
+
+window.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !createModal.classList.contains('hidden')) closeCreateModal();
+});
+
+document.querySelector<HTMLInputElement>('#create-image')!.addEventListener('input', (event) => {
+  const uri = (event.currentTarget as HTMLInputElement).value.trim();
+  const logo = imageUrl(uri);
+  const preview = document.querySelector<HTMLElement>('#create-image-preview')!;
+  preview.innerHTML = logo ? `<img src="${logo}" alt="" />` : '#';
+});
+
+document.querySelector<HTMLFormElement>('#create-form')!.addEventListener('submit', async (event) => {
+  event.preventDefault();
+
+  const target = status('#create-status');
+  if (!account) {
+    showStatus(target, 'Connect your Ultra Wallet first.', 'error');
+    return;
+  }
+
+  const creator = account;
+  const name = document.querySelector<HTMLInputElement>('#create-name')!.value.trim();
+  const symbol = document.querySelector<HTMLInputElement>('#create-symbol')!.value.trim().toUpperCase();
+  const image = document.querySelector<HTMLInputElement>('#create-image')!.value.trim();
+  const description = document.querySelector<HTMLTextAreaElement>('#create-description')!.value.trim();
+  const website = document.querySelector<HTMLInputElement>('#create-website')!.value.trim();
+  const xUrl = document.querySelector<HTMLInputElement>('#create-x')!.value.trim();
+  const telegram = document.querySelector<HTMLInputElement>('#create-telegram')!.value.trim();
+  const initialBuyRaw =
+    document.querySelector<HTMLInputElement>('#create-initial-buy')!.value.trim() || '0';
+
+  if (!name || utf8Length(name) > 64) {
+    showStatus(target, 'Name must be between 1 and 64 UTF-8 bytes.', 'error');
+    return;
+  }
+
+  if (!/^[A-Z]{1,7}$/.test(symbol)) {
+    showStatus(target, 'Ticker must be 1–7 letters.', 'error');
+    return;
+  }
+
+  createSubmit.disabled = true;
+
+  try {
+    const supply = formatAmount(TOTAL_SUPPLY, TOKEN_DECIMALS, symbol);
+
+    createSubmit.textContent = '1/4 · Creating token…';
+    showStatus(target, 'Approve token creation in Ultra Wallet.');
+    await sign(FALLBACK_TOKEN_CONTRACT, 'launch', {
+      issuer: creator,
+      maximum_supply: supply,
+      initial_supply: supply,
+      token_name: name,
+      metadata_uri: image,
+    });
+
+    createSubmit.textContent = '2/4 · Creating market…';
+    showStatus(target, 'Approve the Hashed40 bonding-curve market.');
+    await sign(PAD_CONTRACT, 'createmarket', {
+      creator,
+      token_symbol: `${TOKEN_DECIMALS},${symbol}`,
+      token_allocation: formatAmount(CURVE_ALLOCATION, TOKEN_DECIMALS, symbol),
+      start_price: formatAmount(START_PRICE, PAYMENT_DECIMALS, PAYMENT_SYMBOL),
+      end_price: formatAmount(END_PRICE, PAYMENT_DECIMALS, PAYMENT_SYMBOL),
+      graduation_target: formatAmount(GRADUATION_TARGET, PAYMENT_DECIMALS, PAYMENT_SYMBOL),
+      display_name: name,
+      image_uri: image,
+      description,
+      website,
+      x_url: xUrl,
+      telegram_url: telegram,
+    });
+
+    showStatus(target, 'Waiting for the new meme market to appear on Ultra…');
+    const market = await waitForMarket(creator, symbol);
+    const marketId = Number(market.id);
+
+    createSubmit.textContent = '3/4 · Seeding curve…';
+    showStatus(target, 'Approve the meme supply deposit into the curve.');
+    await sign(FALLBACK_TOKEN_CONTRACT, 'transfer', {
+      from: creator,
+      to: PAD_CONTRACT,
+      quantity: formatAmount(CURVE_ALLOCATION, TOKEN_DECIMALS, symbol),
+      memo: `seed:${marketId}`,
+    });
+
+    createSubmit.textContent = '4/4 · Going live…';
+    showStatus(target, 'Approve trading activation.');
+    await sign(PAD_CONTRACT, 'activate', { market_id: marketId });
+
+    const initialBuy = Number(initialBuyRaw);
+    if (Number.isFinite(initialBuy) && initialBuy > 0) {
+      createSubmit.textContent = 'Initial buy…';
+      showStatus(target, 'Meme is live. Approve your optional first buy.');
+      await sign(PAYMENT_CONTRACT, 'transfer', {
+        from: creator,
+        to: PAD_CONTRACT,
+        quantity: formatAmount(initialBuyRaw, PAYMENT_DECIMALS, PAYMENT_SYMBOL),
+        memo: `buy:${marketId}`,
+      });
+    }
+
+    showStatus(target, `$${symbol} is live on Hashed40.`, 'ok');
+    activeFilter = 'new';
+    await refreshMarkets();
+
+    const live = allMarkets.find((item) => Number(item.id) === marketId);
+    if (live) selectMarket(live);
+
+    setTimeout(() => {
+      closeCreateModal();
+      document.querySelector('#markets')!.scrollIntoView({ behavior: 'smooth' });
+    }, 700);
+  } catch (err: unknown) {
+    showStatus(target, errorMessage(err), 'error');
+  } finally {
+    createSubmit.disabled = !account;
+    createSubmit.textContent = account ? 'Launch meme' : 'Connect wallet to create';
   }
 });
 
