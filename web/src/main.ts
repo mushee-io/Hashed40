@@ -115,10 +115,10 @@ function formatAmount(raw: string, decimals: number, symbol: string): string {
 
   const [whole, fraction = ''] = value.split('.');
   if (fraction.length > decimals) {
-    throw new Error(\`Use no more than \${decimals} decimal places.\`);
+    throw new Error(`Use no more than ${decimals} decimal places.`);
   }
 
-  return \`\${whole}.\${fraction.padEnd(decimals, '0')} \${symbol}\`;
+  return `${whole}.${fraction.padEnd(decimals, '0')} ${symbol}`;
 }
 
 function assetNumber(asset: string): number {
@@ -137,16 +137,16 @@ function symbolPrecision(symbol: string) {
 
 function imageUrl(uri: string): string | undefined {
   if (!uri) return undefined;
-  if (uri.startsWith('ipfs://')) return \`https://ipfs.io/ipfs/\${uri.slice(7)}\`;
+  if (uri.startsWith('ipfs://')) return `https://ipfs.io/ipfs/${uri.slice(7)}`;
   if (/^https?:\/\//i.test(uri)) return uri;
   return undefined;
 }
 
 function formatCompact(value: number) {
   if (!Number.isFinite(value)) return '0';
-  if (Math.abs(value) >= 1_000_000_000) return \`\${(value / 1_000_000_000).toFixed(1)}B\`;
-  if (Math.abs(value) >= 1_000_000) return \`\${(value / 1_000_000).toFixed(1)}M\`;
-  if (Math.abs(value) >= 1_000) return \`\${(value / 1_000).toFixed(1)}K\`;
+  if (Math.abs(value) >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(1)}B`;
+  if (Math.abs(value) >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(value) >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
   if (Math.abs(value) >= 1) return value.toFixed(value >= 100 ? 0 : 2);
   return value.toFixed(6);
 }
@@ -183,14 +183,14 @@ function marketImage(market: MarketRow, className = '') {
   const src = imageUrl(market.image_uri);
   const ticker = escapeHtml(symbolCode(market.token_symbol).slice(0, 2) || '#');
   if (src) {
-    return \`<img class="\${className}" src="\${escapeHtml(src)}" alt="" loading="lazy" />\`;
+    return `<img class="${className}" src="${escapeHtml(src)}" alt="" loading="lazy" />`;
   }
-  return \`<div class="image-fallback \${className}"><span>\${ticker}</span></div>\`;
+  return `<div class="image-fallback ${className}"><span>${ticker}</span></div>`;
 }
 
 function showStatus(element: HTMLElement | null, message: string, kind: StatusKind = 'info') {
   if (!element) return;
-  element.className = \`status \${kind}\`;
+  element.className = `status ${kind}`;
   element.textContent = message;
 }
 
@@ -206,7 +206,7 @@ async function fetchMarkets(): Promise<MarketRow[]> {
 
   for (const rpcUrl of RPC_URLS) {
     try {
-      const response = await fetch(\`\${rpcUrl}/v1/chain/get_table_rows\`, {
+      const response = await fetch(`${rpcUrl}/v1/chain/get_table_rows`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -220,7 +220,7 @@ async function fetchMarkets(): Promise<MarketRow[]> {
 
       const text = await response.text();
       if (!response.ok) {
-        lastError = \`\${rpcUrl} returned \${response.status}\`;
+        lastError = `${rpcUrl} returned ${response.status}`;
         continue;
       }
 
@@ -233,7 +233,7 @@ async function fetchMarkets(): Promise<MarketRow[]> {
   }
 
   setOnline(false);
-  throw new Error(\`Could not reach the Hashed40 market table. \${lastError}\`);
+  throw new Error(`Could not reach the Hashed40 market table. ${lastError}`);
 }
 
 async function waitForMarket(creator: string, symbol: string): Promise<MarketRow> {
@@ -284,7 +284,7 @@ async function connectWallet() {
   if (!connectedAccount) throw new Error('Ultra Testnet account was not returned by the wallet.');
   if (connectedAccount === PAD_CONTRACT) {
     throw new Error(
-      \`\${PAD_CONTRACT} is the Hash40 contract/admin account. Switch Ultra Wallet to a different Testnet user account.\`,
+      `${PAD_CONTRACT} is the Hash40 contract/admin account. Switch Ultra Wallet to a different Testnet user account.`,
     );
   }
 
@@ -335,25 +335,25 @@ function toast(message: string, kind: StatusKind = 'info') {
     document.body.appendChild(node);
   }
 
-  node.className = \`global-toast \${kind} visible\`;
+  node.className = `global-toast ${kind} visible`;
   node.textContent = message;
   window.setTimeout(() => node?.classList.remove('visible'), 3600);
 }
 
 function brandMarkup() {
-  return \`
+  return `
     <a class="brand" href="/" aria-label="Hashed40 home">
       <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
       <strong>HASH40</strong>
     </a>
-  \`;
+  `;
 }
 
 function topBarMarkup(createMode = false) {
-  return \`
+  return `
     <header class="topbar">
       <div class="topbar-inner">
-        \${brandMarkup()}
+        ${brandMarkup()}
         <div class="nav-search">
           <span>⌕</span>
           <input id="nav-search" type="search" placeholder="Search memes…" autocomplete="off" />
@@ -363,27 +363,27 @@ function topBarMarkup(createMode = false) {
           <button class="network-chip" type="button"><span class="ultra-dot">U</span> Ultra</button>
           <button class="language-chip" type="button" title="English">EN</button>
           <button class="boost-button" type="button">Boost</button>
-          \${createMode ? '<a class="create-button nav-create" href="/">Explore</a>' : '<button class="create-button nav-create" type="button" data-open-launch>Create Meme +</button>'}
+          ${createMode ? '<a class="create-button nav-create" href="/">Explore</a>' : '<button class="create-button nav-create" type="button" data-open-launch>Create Meme +</button>'}
           <button class="wallet-button" type="button" data-connect-wallet>Connect</button>
           <button class="menu-button" type="button" aria-label="Menu">☰</button>
         </div>
       </div>
     </header>
-  \`;
+  `;
 }
 
 function tickerMarkup() {
-  return \`
+  return `
     <div class="market-ticker" aria-label="Live meme market ticker">
       <div id="ticker-track" class="ticker-track">
         <span class="ticker-empty">Loading Ultra markets…</span>
       </div>
     </div>
-  \`;
+  `;
 }
 
 function bottomBarMarkup() {
-  return \`
+  return `
     <div class="bottom-status">
       <div><strong>Watchlist</strong><span>No memes in watchlist</span></div>
       <div class="bottom-right">
@@ -391,7 +391,7 @@ function bottomBarMarkup() {
         <span class="online"><i></i><b data-network-status>Connecting</b></span>
       </div>
     </div>
-  \`;
+  `;
 }
 
 function renderTicker(markets: MarketRow[]) {
@@ -413,13 +413,13 @@ function renderTicker(markets: MarketRow[]) {
       const ticker = escapeHtml(symbolCode(market.token_symbol));
       const price = currentPrice(market);
       const image = imageUrl(market.image_uri);
-      return \`
+      return `
         <span class="ticker-item">
-          <span class="ticker-avatar">\${image ? \`<img src="\${escapeHtml(image)}" alt="" />\` : ticker.slice(0, 1)}</span>
-          <strong>\${ticker}</strong>
-          <span>\${price.toFixed(8)} \${PAYMENT_SYMBOL}</span>
+          <span class="ticker-avatar">${image ? `<img src="${escapeHtml(image)}" alt="" />` : ticker.slice(0, 1)}</span>
+          <strong>${ticker}</strong>
+          <span>${price.toFixed(8)} ${PAYMENT_SYMBOL}</span>
         </span>
-      \`;
+      `;
     })
     .join('');
 
@@ -440,37 +440,37 @@ function renderTrending(markets: MarketRow[]) {
     .slice(0, 4);
 
   if (!trending.length) {
-    root.innerHTML = \`
+    root.innerHTML = `
       <div class="trending-empty">
         <strong>No trending memes yet.</strong>
         <span>The first live Hashed40 markets will appear here.</span>
       </div>
-    \`;
+    `;
     return;
   }
 
   root.innerHTML = trending
     .map((market) => {
       const ticker = symbolCode(market.token_symbol);
-      return \`
-        <button class="trending-card" type="button" data-market-id="\${market.id}">
-          <div class="trending-image">\${marketImage(market)}</div>
+      return `
+        <button class="trending-card" type="button" data-market-id="${market.id}">
+          <div class="trending-image">${marketImage(market)}</div>
           <div class="trending-copy">
             <div class="trend-title">
-              <strong>\${escapeHtml(market.display_name || ticker)}</strong>
-              <span>$\${escapeHtml(ticker)}</span>
+              <strong>${escapeHtml(market.display_name || ticker)}</strong>
+              <span>$${escapeHtml(ticker)}</span>
             </div>
             <div class="trend-cap">
-              <strong>\${formatCompact(estimatedMarketCap(market))} \${PAYMENT_SYMBOL}</strong>
-              <span class="\${market.status === 2 ? 'positive' : ''}">\${statusLabel(market)}</span>
+              <strong>${formatCompact(estimatedMarketCap(market))} ${PAYMENT_SYMBOL}</strong>
+              <span class="${market.status === 2 ? 'positive' : ''}">${statusLabel(market)}</span>
             </div>
             <div class="trend-meta">
-              <span>Vol \${formatCompact(assetNumber(market.volume))}</span>
-              <span>Curve \${progress(market).toFixed(0)}%</span>
+              <span>Vol ${formatCompact(assetNumber(market.volume))}</span>
+              <span>Curve ${progress(market).toFixed(0)}%</span>
             </div>
           </div>
         </button>
-      \`;
+      `;
     })
     .join('');
 
@@ -523,42 +523,42 @@ function renderMarketGrid() {
   const rows = filtered.slice(start, start + PAGE_SIZE);
 
   if (resultCount) {
-    resultCount.textContent = \`\${filtered.length} meme\${filtered.length === 1 ? '' : 's'}\`;
+    resultCount.textContent = `${filtered.length} meme${filtered.length === 1 ? '' : 's'}`;
   }
 
   if (!rows.length) {
-    root.innerHTML = \`
+    root.innerHTML = `
       <div class="market-empty">
         <strong>No memes found.</strong>
         <span>Launch the first one or change your filters.</span>
         <button type="button" data-open-launch>Create Meme</button>
       </div>
-    \`;
+    `;
     root.querySelector<HTMLButtonElement>('[data-open-launch]')?.addEventListener('click', openLaunchModal);
   } else {
     root.innerHTML = rows
       .map((market) => {
         const ticker = symbolCode(market.token_symbol);
         const pct = progress(market);
-        return \`
-          <button class="meme-card" type="button" data-market-id="\${market.id}">
+        return `
+          <button class="meme-card" type="button" data-market-id="${market.id}">
             <div class="meme-card-image">
-              \${marketImage(market)}
-              <span class="card-status">\${statusLabel(market)}</span>
+              ${marketImage(market)}
+              <span class="card-status">${statusLabel(market)}</span>
               <span class="card-chain">U</span>
             </div>
             <div class="meme-card-body">
-              <strong class="meme-name">\${escapeHtml(market.display_name || ticker)}</strong>
-              <span class="meme-ticker">$\${escapeHtml(ticker)}</span>
+              <strong class="meme-name">${escapeHtml(market.display_name || ticker)}</strong>
+              <span class="meme-ticker">$${escapeHtml(ticker)}</span>
               <div class="meme-metrics">
-                <strong>\${formatCompact(estimatedMarketCap(market))} <small>MC</small></strong>
-                <span class="\${market.status === 2 ? 'positive' : 'muted'}">\${market.status === 2 ? 'Graduated' : \`\${pct.toFixed(1)}%\`}</span>
+                <strong>${formatCompact(estimatedMarketCap(market))} <small>MC</small></strong>
+                <span class="${market.status === 2 ? 'positive' : 'muted'}">${market.status === 2 ? 'Graduated' : `${pct.toFixed(1)}%`}</span>
               </div>
-              <div class="bonding-line"><i style="width:\${pct}%"></i></div>
-              <div class="bonding-copy"><span>Bonding</span><span>\${pct.toFixed(0)}%</span></div>
+              <div class="bonding-line"><i style="width:${pct}%"></i></div>
+              <div class="bonding-copy"><span>Bonding</span><span>${pct.toFixed(0)}%</span></div>
             </div>
           </button>
-        \`;
+        `;
       })
       .join('');
 
@@ -571,18 +571,18 @@ function renderMarketGrid() {
   }
 
   const pageNumbers = Array.from({ length: Math.min(pages, 5) }, (_, index) => index + 1);
-  pagination.innerHTML = \`
-    <button type="button" data-page="\${Math.max(1, currentPage - 1)}" \${currentPage === 1 ? 'disabled' : ''}>←</button>
-    \${pageNumbers
+  pagination.innerHTML = `
+    <button type="button" data-page="${Math.max(1, currentPage - 1)}" ${currentPage === 1 ? 'disabled' : ''}>←</button>
+    ${pageNumbers
       .map(
         (page) =>
-          \`<button type="button" data-page="\${page}" class="\${page === currentPage ? 'active' : ''}">\${page}</button>\`,
+          `<button type="button" data-page="${page}" class="${page === currentPage ? 'active' : ''}">${page}</button>`,
       )
       .join('')}
-    \${pages > 5 ? '<span>…</span>' : ''}
-    \${pages > 5 ? \`<button type="button" data-page="\${pages}">\${pages}</button>\` : ''}
-    <button type="button" data-page="\${Math.min(pages, currentPage + 1)}" \${currentPage === pages ? 'disabled' : ''}>→</button>
-  \`;
+    ${pages > 5 ? '<span>…</span>' : ''}
+    ${pages > 5 ? `<button type="button" data-page="${pages}">${pages}</button>` : ''}
+    <button type="button" data-page="${Math.min(pages, currentPage + 1)}" ${currentPage === pages ? 'disabled' : ''}>→</button>
+  `;
 
   pagination.querySelectorAll<HTMLButtonElement>('[data-page]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -619,22 +619,22 @@ function openTradeDrawer(market: MarketRow) {
   const src = imageUrl(market.image_uri);
 
   document.querySelector<HTMLElement>('#trade-image')!.innerHTML = src
-    ? \`<img src="\${escapeHtml(src)}" alt="" />\`
-    : \`<div class="image-fallback"><span>\${escapeHtml(ticker.slice(0, 2))}</span></div>\`;
+    ? `<img src="${escapeHtml(src)}" alt="" />`
+    : `<div class="image-fallback"><span>${escapeHtml(ticker.slice(0, 2))}</span></div>`;
   document.querySelector<HTMLElement>('#trade-name')!.textContent = market.display_name || ticker;
   document.querySelector<HTMLElement>('#trade-ticker')!.textContent = '$' + ticker;
   document.querySelector<HTMLElement>('#trade-description')!.textContent =
     market.description || 'Meme market on Ultra.';
   document.querySelector<HTMLElement>('#trade-price')!.textContent =
-    \`\${currentPrice(market).toFixed(8)} \${PAYMENT_SYMBOL}\`;
+    `${currentPrice(market).toFixed(8)} ${PAYMENT_SYMBOL}`;
   document.querySelector<HTMLElement>('#trade-cap')!.textContent =
-    \`\${formatCompact(estimatedMarketCap(market))} \${PAYMENT_SYMBOL}\`;
+    `${formatCompact(estimatedMarketCap(market))} ${PAYMENT_SYMBOL}`;
   document.querySelector<HTMLElement>('#trade-volume')!.textContent =
-    \`\${formatCompact(assetNumber(market.volume))} \${PAYMENT_SYMBOL}\`;
+    `${formatCompact(assetNumber(market.volume))} ${PAYMENT_SYMBOL}`;
   document.querySelector<HTMLElement>('#trade-reserve')!.textContent =
-    \`\${formatCompact(assetNumber(market.reserve))} \${PAYMENT_SYMBOL}\`;
-  document.querySelector<HTMLElement>('#trade-progress')!.textContent = \`\${pct.toFixed(1)}%\`;
-  document.querySelector<HTMLElement>('#trade-progress-bar')!.style.width = \`\${pct}%\`;
+    `${formatCompact(assetNumber(market.reserve))} ${PAYMENT_SYMBOL}`;
+  document.querySelector<HTMLElement>('#trade-progress')!.textContent = `${pct.toFixed(1)}%`;
+  document.querySelector<HTMLElement>('#trade-progress-bar')!.style.width = `${pct}%`;
   document.querySelector<HTMLElement>('#sell-symbol')!.textContent = ticker;
   document.querySelector<HTMLElement>('#trade-market-state')!.textContent = statusLabel(market);
 
@@ -659,7 +659,7 @@ async function refreshHome() {
     renderTicker(allMarkets);
     renderTrending(allMarkets);
     renderMarketGrid();
-    showStatus(state, \`\${allMarkets.length} on-chain market\${allMarkets.length === 1 ? '' : 's'} loaded.\`, 'ok');
+    showStatus(state, `${allMarkets.length} on-chain market${allMarkets.length === 1 ? '' : 's'} loaded.`, 'ok');
   } catch (err) {
     renderTicker([]);
     allMarkets = [];
@@ -671,9 +671,9 @@ async function refreshHome() {
 
 function renderHome() {
   document.title = 'Hashed40 — Trade Memes on Ultra';
-  app.innerHTML = \`
-    \${topBarMarkup(false)}
-    \${tickerMarkup()}
+  app.innerHTML = `
+    ${topBarMarkup(false)}
+    ${tickerMarkup()}
 
     <main class="page-shell home-shell">
       <section class="product-hero">
@@ -781,7 +781,7 @@ function renderHome() {
 
       <div id="buy-panel" class="order-panel">
         <label>Spend
-          <div class="trade-input"><input id="buy-amount" inputmode="decimal" value="1" /><span>\${PAYMENT_SYMBOL}</span></div>
+          <div class="trade-input"><input id="buy-amount" inputmode="decimal" value="1" /><span>${PAYMENT_SYMBOL}</span></div>
         </label>
         <div class="quick-row">
           <button type="button" data-buy="1">1</button>
@@ -803,8 +803,8 @@ function renderHome() {
     </aside>
     <div id="drawer-scrim" class="drawer-scrim"></div>
 
-    \${bottomBarMarkup()}
-  \`;
+    ${bottomBarMarkup()}
+  `;
 
   bindWalletButtons();
 
@@ -880,9 +880,9 @@ function renderHome() {
         from: account,
         to: PAD_CONTRACT,
         quantity: formatAmount(amount, PAYMENT_DECIMALS, PAYMENT_SYMBOL),
-        memo: \`buy:\${selectedMarket.id}\`,
+        memo: `buy:${selectedMarket.id}`,
       });
-      showStatus(target, \`Buy submitted · \${hash}\`, 'ok');
+      showStatus(target, `Buy submitted · ${hash}`, 'ok');
       await refreshHome();
       const fresh = allMarkets.find((market) => String(market.id) === String(selectedMarket?.id));
       if (fresh) openTradeDrawer(fresh);
@@ -916,9 +916,9 @@ function renderHome() {
         from: account,
         to: PAD_CONTRACT,
         quantity: formatAmount(amount, symbolPrecision(selectedMarket.token_symbol), ticker),
-        memo: \`sell:\${selectedMarket.id}\`,
+        memo: `sell:${selectedMarket.id}`,
       });
-      showStatus(target, \`Sell submitted · \${hash}\`, 'ok');
+      showStatus(target, `Sell submitted · ${hash}`, 'ok');
       await refreshHome();
       const fresh = allMarkets.find((market) => String(market.id) === String(selectedMarket?.id));
       if (fresh) openTradeDrawer(fresh);
@@ -950,9 +950,9 @@ type CurveChoice = 'fair' | 'standard' | 'steep' | 'custom';
 
 function renderCreate() {
   document.title = 'Create Meme — Hashed40';
-  app.innerHTML = \`
-    \${topBarMarkup(true)}
-    \${tickerMarkup()}
+  app.innerHTML = `
+    ${topBarMarkup(true)}
+    ${tickerMarkup()}
 
     <main class="page-shell create-page">
       <div class="create-page-top">
@@ -1045,8 +1045,8 @@ function renderCreate() {
                   <b><span id="target-raise-value">3</span> UOS</b>
                 </div>
                 <div class="segmented five">
-                  \${[1, 2, 3, 4, 5]
-                    .map((value) => \`<button type="button" data-target-raise="\${value}" class="\${value === 3 ? 'active' : ''}">\${value}</button>\`)
+                  ${[1, 2, 3, 4, 5]
+                    .map((value) => `<button type="button" data-target-raise="${value}" class="${value === 3 ? 'active' : ''}">${value}</button>`)
                     .join('')}
                 </div>
               </div>
@@ -1096,9 +1096,9 @@ function renderCreate() {
             </section>
 
             <div class="launch-summary">
-              <div><span>Token factory</span><strong>\${TOKEN_FACTORY}</strong></div>
-              <div><span>Market contract</span><strong>\${PAD_CONTRACT}</strong></div>
-              <div><span>Settlement</span><strong>\${PAYMENT_SYMBOL}</strong></div>
+              <div><span>Token factory</span><strong>${TOKEN_FACTORY}</strong></div>
+              <div><span>Market contract</span><strong>${PAD_CONTRACT}</strong></div>
+              <div><span>Settlement</span><strong>${PAYMENT_SYMBOL}</strong></div>
             </div>
 
             <button id="create-submit" class="launch-submit" type="submit" disabled>Connect wallet to launch</button>
@@ -1140,8 +1140,8 @@ function renderCreate() {
       </section>
     </main>
 
-    \${bottomBarMarkup()}
-  \`;
+    ${bottomBarMarkup()}
+  `;
 
   bindWalletButtons();
 
@@ -1165,31 +1165,31 @@ function renderCreate() {
     document.querySelector<HTMLElement>('#preview-name')!.textContent = name;
     document.querySelector<HTMLElement>('#preview-symbol')!.textContent = '$' + symbol;
     document.querySelector<HTMLElement>('#preview-description')!.textContent = description;
-    document.querySelector<HTMLElement>('#preview-target')!.textContent = \`\${targetRaise} UOS raised\`;
-    document.querySelector<HTMLElement>('#preview-curve')!.textContent = \`\${curveMultiplier.toFixed(curveMultiplier % 1 ? 1 : 0)}× rise\`;
+    document.querySelector<HTMLElement>('#preview-target')!.textContent = `${targetRaise} UOS raised`;
+    document.querySelector<HTMLElement>('#preview-curve')!.textContent = `${curveMultiplier.toFixed(curveMultiplier % 1 ? 1 : 0)}× rise`;
     document.querySelector<HTMLElement>('#curve-multiplier-value')!.textContent =
       curveMultiplier.toFixed(curveMultiplier % 1 ? 1 : 0);
     document.querySelector<HTMLElement>('#target-raise-value')!.textContent = String(targetRaise);
 
     const openCap = Number(START_PRICE) * Number(TOTAL_SUPPLY);
     document.querySelector<HTMLElement>('#preview-open-cap')!.textContent =
-      \`\${formatCompact(openCap)} UOS MC\`;
+      `${formatCompact(openCap)} UOS MC`;
 
     const previewImage = document.querySelector<HTMLElement>('#preview-image')!;
     const previewBase = image
-      ? \`<img src="\${escapeHtml(image)}" alt="" />\`
+      ? `<img src="${escapeHtml(image)}" alt="" />`
       : '<div class="image-fallback"><span>#</span></div>';
-    previewImage.innerHTML = \`
-      \${previewBase}
+    previewImage.innerHTML = `
+      ${previewBase}
       <span class="preview-chain">ULTRA</span>
       <div class="preview-overlay">
-        <strong id="preview-name">\${escapeHtml(name)}</strong>
-        <span id="preview-symbol">$\${escapeHtml(symbol)}</span>
+        <strong id="preview-name">${escapeHtml(name)}</strong>
+        <span id="preview-symbol">$${escapeHtml(symbol)}</span>
       </div>
-    \`;
+    `;
 
     const imagePreview = document.querySelector<HTMLElement>('#create-image-preview')!;
-    imagePreview.innerHTML = image ? \`<img src="\${escapeHtml(image)}" alt="" />\` : '<span>＋</span>';
+    imagePreview.innerHTML = image ? `<img src="${escapeHtml(image)}" alt="" />` : '<span>＋</span>';
   };
 
   [nameInput, symbolInput, descriptionInput, imageInput].forEach((input) =>
@@ -1249,7 +1249,7 @@ function renderCreate() {
     if (account === PAD_CONTRACT) {
       showStatus(
         target,
-        \`\${PAD_CONTRACT} is the Hash40 contract account. Use a separate Testnet user account to launch memes.\`,
+        `${PAD_CONTRACT} is the Hash40 contract account. Use a separate Testnet user account to launch memes.`,
         'error',
       );
       return;
@@ -1302,7 +1302,7 @@ function renderCreate() {
       showStatus(target, 'Approve the Hashed40 bonding-curve market.');
       await sign(PAD_CONTRACT, 'createmarket', {
         creator: account,
-        token_symbol: \`\${TOKEN_DECIMALS},\${symbol}\`,
+        token_symbol: `${TOKEN_DECIMALS},${symbol}`,
         token_allocation: formatAmount(CURVE_ALLOCATION, TOKEN_DECIMALS, symbol),
         start_price: formatAmount(START_PRICE, PAYMENT_DECIMALS, PAYMENT_SYMBOL),
         end_price: formatAmount(endPrice, PAYMENT_DECIMALS, PAYMENT_SYMBOL),
@@ -1325,7 +1325,7 @@ function renderCreate() {
         from: account,
         to: PAD_CONTRACT,
         quantity: formatAmount(CURVE_ALLOCATION, TOKEN_DECIMALS, symbol),
-        memo: \`seed:\${marketId}\`,
+        memo: `seed:${marketId}`,
       });
 
       launchButton.textContent = '4/4 · Going live…';
@@ -1340,11 +1340,11 @@ function renderCreate() {
           from: account,
           to: PAD_CONTRACT,
           quantity: formatAmount(initialBuyRaw, PAYMENT_DECIMALS, PAYMENT_SYMBOL),
-          memo: \`buy:\${marketId}\`,
+          memo: `buy:${marketId}`,
         });
       }
 
-      showStatus(target, \`$\${symbol} is live on Hashed40.\`, 'ok');
+      showStatus(target, `$${symbol} is live on Hashed40.`, 'ok');
       launchButton.textContent = 'Live ✓';
       window.setTimeout(() => {
         window.location.href = '/?launched=' + marketId;
