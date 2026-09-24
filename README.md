@@ -1,8 +1,10 @@
-# Hashed — Ultra Native Token Launcher
+# Hashed — Ultra Token Launcher + Launchpad
 
-Hashed is a native Ultra / Antelope fungible-token launcher. The current MVP creates tokens, issues supply, transfers balances, burns supply, stores metadata, and includes an Ultra Wallet Testnet frontend.
+Hashed is focused on exactly two products on Ultra: **Token Launcher** and **Launchpad**. The Token Launcher creates and manages native Ultra fungible tokens. The Launchpad will let projects configure and run token launches/sales for those tokens. The DEX and lending protocol are separate projects and are intentionally out of scope for this repository.
 
-## Current scope
+## Product scope
+
+### 1. Token Launcher — working MVP
 
 - Native Ultra C++ / WASM smart contract
 - One-transaction `launch` action
@@ -14,7 +16,25 @@ Hashed is a native Ultra / Antelope fungible-token launcher. The current MVP cre
 - Ultra Wallet SDK Testnet frontend
 - Local Ultra integration tests using `ultratest`
 
-## Contract actions
+### 2. Launchpad — next build target
+
+- Create a launch campaign for a token created through Hashed
+- Configure sale allocation and tokens available for sale
+- Set start/end time
+- Set minimum and maximum contribution
+- Set soft cap and hard cap
+- Configure public or allowlisted participation
+- Accept UOS contributions
+- Finalize successful campaigns
+- Refund contributors when campaign conditions are not met
+- Claim purchased tokens after a successful launch
+- Team / treasury allocation and vesting support
+- Platform launch fee and campaign accounting
+- Campaign status, contribution, and claim views in the frontend
+
+**Out of scope:** DEX, swaps, AMM pools, lending, borrowing, and lending-market oracles.
+
+## Token Launcher contract actions
 
 | Action | Purpose | Authorization |
 |---|---|---|
@@ -227,13 +247,14 @@ Before Mainnet:
 
 1. independent smart-contract audit
 2. fuzz/property tests for supply and balance invariants
-3. launch fee / anti-spam policy
+3. token-launcher fee / anti-spam policy
 4. production RAM/resource sponsorship model
 5. token metadata/indexing standard
-6. vesting and LP-lock contracts
-7. launch-sale and liquidity-bootstrap contracts
-8. Hashed DEX integration
-9. lending only after reliable liquidity/oracle architecture exists
+6. launchpad sale contract
+7. contribution caps and campaign-state tests
+8. success/failure finalization and refund tests
+9. token claim and vesting contracts
+10. launchpad fee accounting and security review
 
 ## Repository structure
 
