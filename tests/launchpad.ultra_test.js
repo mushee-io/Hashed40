@@ -85,7 +85,7 @@ module.exports = class test {
                     'hashedpad',
                     'setconfig',
                     'hashedpad@active',
-                    ['platformfee', 250],
+                    ['hashedlaunch', 'hashedlaunch', '8,TUOS', 'platformfee', 250],
                     'launchpad fee config failed',
                 );
             },
