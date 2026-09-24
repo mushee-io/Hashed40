@@ -13,15 +13,24 @@ command -v cdt-cpp >/dev/null 2>&1 || {
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 
-cd "$CONTRACT_DIR"
-cdt-cpp   -abigen   -I "$CONTRACT_DIR/include"   -contract hashedlaunch   -o "$BUILD_DIR/hashedlaunch.wasm"   "$CONTRACT_DIR/src/hashedlaunch.cpp"
+compile_contract() {
+  local contract_name="$1"
+  local source_file="$2"
 
-if [[ -f "$CONTRACT_DIR/hashedlaunch.abi" && ! -f "$BUILD_DIR/hashedlaunch.abi" ]]; then
-  mv "$CONTRACT_DIR/hashedlaunch.abi" "$BUILD_DIR/hashedlaunch.abi"
-fi
+  echo "==> Compiling $contract_name"
+  cd "$CONTRACT_DIR"
+  cdt-cpp     -abigen     -I "$CONTRACT_DIR/include"     -contract "$contract_name"     -o "$BUILD_DIR/$contract_name.wasm"     "$source_file"
 
-test -s "$BUILD_DIR/hashedlaunch.wasm"
-test -s "$BUILD_DIR/hashedlaunch.abi"
+  if [[ -f "$CONTRACT_DIR/$contract_name.abi" && ! -f "$BUILD_DIR/$contract_name.abi" ]]; then
+    mv "$CONTRACT_DIR/$contract_name.abi" "$BUILD_DIR/$contract_name.abi"
+  fi
+
+  test -s "$BUILD_DIR/$contract_name.wasm"
+  test -s "$BUILD_DIR/$contract_name.abi"
+}
+
+compile_contract hashedlaunch "$CONTRACT_DIR/src/hashedlaunch.cpp"
+compile_contract hashedpad "$CONTRACT_DIR/src/hashedpad.cpp"
 
 echo "Built:"
-ls -lh "$BUILD_DIR/hashedlaunch.wasm" "$BUILD_DIR/hashedlaunch.abi"
+ls -lh   "$BUILD_DIR/hashedlaunch.wasm" "$BUILD_DIR/hashedlaunch.abi"   "$BUILD_DIR/hashedpad.wasm" "$BUILD_DIR/hashedpad.abi"
