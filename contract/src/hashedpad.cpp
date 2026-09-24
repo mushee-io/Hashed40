@@ -57,13 +57,30 @@ uint64_t hashedpad::parse_campaign_id(const string& memo, const string& prefix) 
     return id;
 }
 
-void hashedpad::setconfig(name fee_receiver, uint16_t fee_bps) {
+void hashedpad::setconfig(name launcher_contract,
+                          name payment_contract,
+                          symbol payment_symbol,
+                          name fee_receiver,
+                          uint16_t fee_bps) {
     require_auth(get_self());
+
+    check(is_account(launcher_contract), "token launcher contract does not exist");
+    check(is_account(payment_contract), "payment token contract does not exist");
+    check(payment_symbol.is_valid(), "invalid configured payment symbol");
     check(fee_bps <= 1000, "platform fee cannot exceed 10%");
     check(fee_bps == 0 || is_account(fee_receiver), "fee receiver account does not exist");
 
     config_singleton config(get_self(), get_self().value);
-    config.set(config_row{fee_receiver, fee_bps}, get_self());
+    config.set(
+        config_row{
+            launcher_contract,
+            payment_contract,
+            payment_symbol,
+            fee_receiver,
+            fee_bps
+        },
+        get_self()
+    );
 }
 
 void hashedpad::createcamp(name creator,
@@ -128,7 +145,21 @@ void hashedpad::createcamp(name creator,
     check(st.next_campaign_id > 0, "campaign id overflow");
 
     config_singleton config(get_self(), get_self().value);
-    const auto cfg = config.get_or_default();
+    check(config.exists(), "launchpad is not configured");
+    const auto cfg = config.get();
+
+    check(
+        sale_contract == cfg.launcher_contract,
+        "sale token must come from the configured Hashed token launcher"
+    );
+    check(
+        payment_contract == cfg.payment_contract,
+        "unsupported campaign payment contract"
+    );
+    check(
+        payment_symbol == cfg.payment_symbol,
+        "unsupported campaign payment symbol"
+    );
 
     campaigns table(get_self(), get_self().value);
     const uint64_t campaign_id = st.next_campaign_id;
