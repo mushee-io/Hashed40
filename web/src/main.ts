@@ -8,6 +8,9 @@ const PAYMENT_SYMBOL = import.meta.env.VITE_PAYMENT_SYMBOL || 'UOS';
 const PAYMENT_DECIMALS = Number(import.meta.env.VITE_PAYMENT_DECIMALS || 8);
 const RPC_URL = import.meta.env.VITE_ULTRA_RPC_URL || 'https://test.ultra.eosusa.io';
 
+const ULTRA_MAINNET_CHAIN_ID = 'a9c481dfbc7d9506dc7e87e9a137c931b0a9303f64fd7a1d08b8230133920097';
+const ULTRA_TESTNET_CHAIN_ID = '7fc56be645bb76ab9d747b53089f132dcb7681db06f0852cfa03eaf6f7ac80e9';
+
 const wallet = new UltraWalletSDK({ environment: 'testnet', provider: 'extension' });
 const MAX_ASSET_AMOUNT = (1n << 62n) - 1n;
 
@@ -230,6 +233,12 @@ function formatAsset(raw: string, decimals: number, symbol: string): { atomic: b
   };
 }
 
+function walletErrorCode(err: unknown): number | undefined {
+  if (typeof err !== 'object' || err === null) return undefined;
+  const candidate = err as { code?: unknown };
+  return typeof candidate.code === 'number' ? candidate.code : undefined;
+}
+
 function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
 
@@ -389,20 +398,68 @@ connectButton.addEventListener('click', async () => {
   if (!('ultra' in window)) {
     showStatus(
       launcherStatus,
-      'Ultra Wallet Extension was not detected. On Testnet, use the browser extension and open this site over HTTPS.',
+      'Ultra Wallet Extension was not detected. Testnet requires the Ultra browser extension.',
       'error',
     );
     return;
   }
 
-  showStatus(launcherStatus, 'Opening Ultra Wallet…');
+  connectButton.disabled = true;
 
   try {
+    showStatus(launcherStatus, 'Checking Ultra Wallet network…');
+
+    const chainResponse = await wallet.getChainId();
+    const currentChainId = chainResponse.data;
+
+    if (currentChainId !== ULTRA_TESTNET_CHAIN_ID) {
+      const currentNetwork =
+        currentChainId === ULTRA_MAINNET_CHAIN_ID
+          ? 'Mainnet'
+          : currentChainId
+            ? `another network (${currentChainId.slice(0, 10)}…)`
+            : 'an unavailable network';
+
+      showStatus(
+        launcherStatus,
+        `Ultra Wallet is on ${currentNetwork}. Hashed is currently Testnet-only. Trying to switch to Ultra Testnet…`,
+        'info',
+      );
+
+      try {
+        // This succeeds automatically for origins that the extension already trusts.
+        // On a first connection Ultra requires the user to choose Testnet manually.
+        await wallet.switchNetwork(ULTRA_TESTNET_CHAIN_ID);
+      } catch (switchErr: unknown) {
+        const code = walletErrorCode(switchErr);
+
+        if (code === 4100) {
+          throw new Error(
+            'Your wallet is on Ultra Mainnet. Open the Ultra Wallet extension → Networks → Testnet, switch to Testnet, then click Connect again.',
+          );
+        }
+
+        throw new Error(
+          `Could not switch Ultra Wallet to Testnet automatically. Open the Ultra Wallet extension → Networks → Testnet, switch networks, then try again. ${errorMessage(switchErr)}`,
+        );
+      }
+
+      const switched = await wallet.getChainId();
+      if (switched.data !== ULTRA_TESTNET_CHAIN_ID) {
+        throw new Error(
+          'Ultra Wallet did not switch to Testnet. Open the extension → Networks → Testnet, then click Connect again.',
+        );
+      }
+    }
+
+    showStatus(launcherStatus, 'Connecting to Ultra Testnet…');
     const { data } = await wallet.connect();
     account = data.blockchainid;
 
     if (!account) {
-      throw new Error('Ultra Wallet connected without returning a blockchain account.');
+      throw new Error(
+        'Ultra Testnet is selected, but the wallet did not return a Testnet account. A Testnet account is required before Hashed can sign transactions.',
+      );
     }
 
     connectButton.textContent = account;
@@ -411,7 +468,22 @@ connectButton.addEventListener('click', async () => {
     setWalletControls(true);
     showStatus(launcherStatus, 'Wallet connected to Ultra Testnet.', 'ok');
   } catch (err: unknown) {
-    showStatus(launcherStatus, errorMessage(err), 'error');
+    account = undefined;
+    setWalletControls(false);
+
+    const message = errorMessage(err);
+
+    if (message.includes('a9c481dfbc7d9506dc7e87e9a137c931b0a9303f64fd7a1d08b8230133920097')) {
+      showStatus(
+        launcherStatus,
+        'Your Ultra Wallet is currently on Mainnet. Hashed is Testnet-only right now. Open Ultra Wallet → Networks → Testnet, then click Connect again.',
+        'error',
+      );
+    } else {
+      showStatus(launcherStatus, message, 'error');
+    }
+  } finally {
+    connectButton.disabled = false;
   }
 });
 
