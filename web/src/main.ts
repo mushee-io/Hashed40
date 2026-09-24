@@ -700,3 +700,35 @@ document.querySelector<HTMLButtonElement>('#refund-payment')!.addEventListener('
 });
 
 async function updateAllowlist(button: HTMLButtonElement, allowed: boolean) {
+  requiredAccount();
+
+  const targetAccount = document.querySelector<HTMLInputElement>('#allowlist-account')!.value.trim();
+  if (!targetAccount) throw new Error('Enter an Ultra account to update.');
+
+  await withButton(button, operationsStatus, allowed ? 'Adding…' : 'Removing…', () =>
+    signTransaction(PAD_CONTRACT, 'setallow', {
+      campaign_id: campaignId(),
+      account: targetAccount,
+      allowed,
+    }),
+  );
+}
+
+document.querySelector<HTMLButtonElement>('#allow-account')!.addEventListener('click', async (event) => {
+  try {
+    await updateAllowlist(event.currentTarget as HTMLButtonElement, true);
+  } catch (err: unknown) {
+    showStatus(operationsStatus, errorMessage(err), 'error');
+  }
+});
+
+document.querySelector<HTMLButtonElement>('#remove-account')!.addEventListener('click', async (event) => {
+  try {
+    await updateAllowlist(event.currentTarget as HTMLButtonElement, false);
+  } catch (err: unknown) {
+    showStatus(operationsStatus, errorMessage(err), 'error');
+  }
+});
+
+setDefaultCampaignDates();
+setWalletControls(false);
