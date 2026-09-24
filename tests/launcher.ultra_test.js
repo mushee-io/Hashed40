@@ -1,6 +1,9 @@
 module.exports = class test {
     requiresSystemContracts() {
-        return true;
+        // The launcher itself does not depend on Ultra's system contract.
+        // Keeping this test systemless avoids coupling contract correctness to
+        // the current precompiled eosio.system bundle in the dev image.
+        return false;
     }
 
     importContracts() {
@@ -13,7 +16,7 @@ module.exports = class test {
         ];
     }
 
-    requiredUnlimitedAccounts() {
+    requiredAccounts() {
         return ['hashcreator', 'receiveracct'];
     }
 
