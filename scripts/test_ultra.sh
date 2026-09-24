@@ -67,4 +67,4 @@ run_ultratest launcher.ultra_test.js
 run_ultratest launchpad.ultra_test.js
 
 echo
-echo "PASS: Token Launcher + Launchpad integration suite"
+echo "PASS: Token Launcher + Meme Launchpad bonding curve integration suite"
