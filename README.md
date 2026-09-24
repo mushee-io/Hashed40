@@ -1,217 +1,166 @@
-# Hashed — Ultra Token Launcher + Meme Launchpad
+# Hashed40 — Meme Launchpad on Ultra
 
-Hashed is focused on two products on Ultra:
+Hashed40 is a **Pump.fun-style meme launchpad for the Ultra blockchain**.
 
-1. **Token Launcher** — create native fungible tokens on Ultra.
-2. **Meme Launchpad** — launch those tokens on a UOS bonding curve with native buy/sell support before graduation.
+This repository is intentionally focused on one product:
 
-The old fundraising/IDO-style launchpad has been archived under `legacy/raise/`. DEX and lending remain separate projects and are not part of Hashed40.
+> Create a meme coin, put it on a UOS bonding curve, and let people buy/sell it.
 
-## 1. Token Launcher
+The standalone native Ultra token launcher now lives in **mushee-io/HashTL**.
 
-The launcher is an eosio.token-style Ultra / Antelope C++ contract.
-
-### Actions
-
-| Action | Purpose |
-|---|---|
-| `launch` | Create a token and issue its initial supply atomically |
-| `create` | Create a token without issuing supply |
-| `issue` | Mint additional supply up to the configured maximum |
-| `retire` | Burn issuer-held supply |
-| `transfer` | Transfer tokens |
-| `open` / `close` | Manage token balance rows |
-| `setmeta` | Update token metadata |
-
-The token issuer controls future minting. Hashed does not have an admin mint path for another creator's token.
-
-## 2. Meme Launchpad
-
-The launchpad turns a Hashed-created token into a simple Pump.fun-style Ultra market.
-
-### Creator flow
+## Product flow
 
 ```text
-Create token
-    ↓
-Create meme market
-    ↓
-Choose token allocation
-    ↓
-Set start price / end price
-    ↓
-Set UOS graduation target
-    ↓
-Add image + description + social links
-    ↓
-Deposit curve allocation
-    ↓
-Activate
+Create coin
+   ↓
+Name + ticker + logo + description
+   ↓
+Hashed40 uses HashTL to create the Ultra token
+   ↓
+Hashed40 creates and seeds the bonding curve
+   ↓
+Trading goes live
+   ↓
+Buy with UOS ↔ Sell token for UOS
+   ↓
+Graduation threshold
 ```
 
-### Trader flow
+The creator does **not** have to configure maximum supply, decimals, curve allocation, start price, end price, or other protocol engineering parameters in the UI. Hashed40 owns those defaults.
 
-```text
-Live market
-   ↓
-Buy token with UOS
-   ↕
-Linear bonding curve
-   ↕
-Sell token for UOS
-   ↓
-Graduation target reached
-   ↓
-Curve closes
-```
+## Create Coin UX
 
-No external DEX is required for the pre-graduation market.
+Creators enter:
 
-### Launchpad actions
+- logo
+- name
+- ticker
+- description
+- website (optional)
+- X (optional)
+- Telegram (optional)
+- optional initial UOS buy
 
-| Action | Purpose |
-|---|---|
-| `setconfig` | Set trusted Hashed launcher, payment asset, fee receiver and protocol fee |
-| `createmarket` | Create a meme-token bonding-curve market |
-| `activate` | Open the curve after the full sale allocation is deposited |
-| `settle` | Settle a graduated market to the creator |
+The frontend then orchestrates the required Ultra transactions:
 
-Token transfers into the launchpad drive the trading flow:
+1. create the fungible token through the configured HashTL contract;
+2. create the Hashed40 meme market;
+3. deposit the fixed token supply into the curve;
+4. activate trading;
+5. optionally perform the creator's first buy.
 
-| Transfer memo | Purpose |
-|---|---|
-| `seed:<market_id>` | Creator deposits the token allocation |
-| `buy:<market_id>` | User buys from the curve with UOS |
-| `sell:<market_id>` | User sells the launched token back into the curve |
+## Meme market
+
+Each market tracks:
+
+- creator
+- token symbol
+- logo and metadata
+- UOS bonding-curve reserve
+- token amount sold
+- volume
+- protocol fee
+- graduation target
+- market status
+
+Users can discover markets by:
+
+- New
+- Trending
+- Graduating
+- Graduated
+
+A token page/card displays price, volume, reserve and graduation progress.
 
 ## Bonding curve
 
-Hashed currently uses a deterministic **linear bonding curve**.
+Hashed40 currently uses a deterministic linear bonding curve.
 
-The market stores:
+While a market is live:
 
-- start price
-- end price
-- token allocation
-- tokens sold
-- UOS reserve
-- UOS volume
-- graduation target
-- protocol fee
-- market metadata
+- users buy with UOS;
+- the token price rises as curve inventory is sold;
+- users can sell tokens back into the curve for UOS;
+- protocol fees apply to buys and sells;
+- unused buy input is refunded automatically.
 
-The marginal price rises linearly as more of the allocation is sold.
+When the graduation reserve target is reached, the contract marks the market as graduated and disables further curve trading.
 
-Buy transactions:
+The graduated reserve stays locked in the Hashed40 contract in this MVP. It is **not withdrawable by the token creator**. A future migration mechanism can be added separately without turning this repository into a DEX.
 
-1. receive UOS;
-2. calculate the maximum token output under the curve;
-3. charge the protocol fee only on the curve cost actually consumed;
-4. refund unused UOS to the buyer;
-5. transfer purchased tokens;
-6. graduate automatically when the reserve target is reached or the curve sells out.
+## HashTL dependency
 
-Sell transactions:
+Hashed40 does not contain the standalone token-launcher product anymore.
 
-1. receive launched tokens back into the launchpad;
-2. reverse the same curve integral;
-3. deduct the protocol fee;
-4. return UOS to the seller;
-5. reduce tokens sold and curve reserve.
+Production configuration points Hashed40 at the deployed HashTL contract:
 
-Trading is disabled once a market graduates.
-
-## Graduation
-
-A market graduates when either:
-
-- its UOS reserve reaches `graduation_target`; or
-- the entire curve token allocation is sold.
-
-The current MVP does **not** automatically create a DEX pool after graduation. That is intentional: the Hashed40 scope is the token launcher and meme launchpad only.
-
-After graduation the creator can call `settle`, which closes the market and returns the remaining curve reserve and any unsold curve allocation.
-
-## Metadata
-
-Each meme launch supports:
-
-- display name
-- image URI
-- description
-- website
-- X / Twitter
-- Telegram
-
-The frontend also shows:
-
-- current curve price
-- UOS reserve
-- volume
-- graduation progress
-- market state
-- creator/trading controls
-
-## Local Ultra integration tests
-
-Ultra's developer image is used in CI:
-
-```bash
-docker pull quay.io/ultra.io/3rdparty-devtools:latest
+```env
+VITE_TOKEN_FACTORY_ACCOUNT=<HASHTL_TESTNET_ACCOUNT>
 ```
 
-Inside the Ultra container:
+The Hashed40 contract also stores the trusted token-factory account in `setconfig`, so markets cannot arbitrarily point at unrelated token contracts.
+
+Repository:
+
+`https://github.com/mushee-io/HashTL`
+
+## Contract actions
+
+| Action | Purpose |
+|---|---|
+| `setconfig` | Configure trusted HashTL token contract, UOS payment asset and protocol fee |
+| `createmarket` | Create a meme bonding-curve market |
+| `activate` | Open trading after the market supply is deposited |
+
+Transfers into Hashed40 use:
+
+| Memo | Meaning |
+|---|---|
+| `seed:<market_id>` | seed the curve with the launched token |
+| `buy:<market_id>` | buy the meme token with UOS |
+| `sell:<market_id>` | sell the meme token back to the curve |
+
+## Local tests
+
+The repository contains a **test-only** token fixture under `tests/fixtures/hashedlaunch` so Hashed40 can be tested independently in CI.
+
+That fixture is not the HashTL product.
+
+Run:
 
 ```bash
-cd /opt/ultra_workdir/Hashed40
 bash scripts/test_ultra.sh
 ```
 
-The suite compiles both WASM contracts and tests:
+The integration suite verifies:
 
-- token creation
-- mint / transfer / burn
-- duplicate-symbol protection
 - meme market creation
-- curve token escrow
+- token escrow
 - activation
-- UOS buy
-- token sell
+- UOS buys
+- sells back into the curve
 - protocol fees
-- curve reserve accounting
+- reserve accounting
 - automatic graduation
-- blocking trades after graduation
-- creator settlement
+- trading disabled after graduation
+- graduated reserve remains locked
 
-A successful run ends with:
+## Build
 
-```text
-PASS: Token Launcher + Launchpad integration suite
-```
-
-## Compile only
+Only the Hashed40 launchpad is built as the product artifact:
 
 ```bash
 bash scripts/compile_ultra.sh
 ```
 
-Artifacts:
+Output:
 
 ```text
-contract/build/hashedlaunch.wasm
-contract/build/hashedlaunch.abi
 contract/build/hashedpad.wasm
 contract/build/hashedpad.abi
 ```
 
 ## Frontend
-
-The frontend has two product tabs:
-
-- **Token Launcher**
-- **Meme Launchpad**
-
-The Meme Launchpad includes creator setup, market discovery, graduation progress, and bonding-curve buy/sell controls.
 
 ```bash
 cd web
@@ -220,73 +169,46 @@ npm install
 npm run dev
 ```
 
-Example Testnet environment:
+Environment:
 
 ```env
-VITE_CONTRACT_ACCOUNT=<HASHED_TOKEN_LAUNCHER_ACCOUNT>
-VITE_LAUNCHPAD_ACCOUNT=<HASHED_LAUNCHPAD_ACCOUNT>
+VITE_TOKEN_FACTORY_ACCOUNT=<HASHTL_TESTNET_ACCOUNT>
+VITE_LAUNCHPAD_ACCOUNT=<HASHED40_TESTNET_ACCOUNT>
 VITE_PAYMENT_CONTRACT=eosio.token
 VITE_PAYMENT_SYMBOL=UOS
 VITE_PAYMENT_DECIMALS=8
-VITE_ULTRA_RPC_URL=https://test.ultra.eosusa.io
+VITE_ULTRA_RPC_URL=https://ultra-testnet.eosphere.io
 ```
 
-The frontend checks the connected Ultra chain and rejects Mainnet while this build is configured for Testnet.
+## Repository scope
 
-## Public Ultra Testnet deployment
+Hashed40 is:
 
-When the public Ultra Testnet accounts/resources are available:
+- meme token creation UX
+- token discovery
+- UOS bonding-curve trading
+- graduation
 
-1. deploy `hashedlaunch.wasm/.abi`;
-2. deploy `hashedpad.wasm/.abi`;
-3. add `hashedpad@eosio.code` to the launchpad account's active authority;
-4. configure the launchpad with:
-   - trusted launcher account
-   - `eosio.token`
-   - `8,UOS`
-   - fee receiver
-   - protocol fee;
-5. set the Vercel environment variables to the real Testnet account names;
-6. create a token;
-7. create, seed and activate a meme market;
-8. test UOS buys, token sells, graduation and settlement;
-9. verify state and transactions on the Ultra Testnet explorer.
+Hashed40 is **not**:
+
+- the generic native token launcher
+- a DEX
+- a lending protocol
+- an IDO/fundraising launchpad
+
+Those are separate ecosystem products.
 
 ## Security status
 
-This is a local/Testnet MVP, not an audited Mainnet release.
+This is a Testnet/local-chain MVP, not an audited Mainnet release.
 
 Before Mainnet:
 
 - independent contract audit
-- fuzz/property tests for curve invariants
-- stronger overflow/rounding tests across token precisions
-- RAM/resource sponsorship review
-- fee and authority review
-- market metadata moderation/spam policy
-- production monitoring and indexing
-- public Testnet soak testing
-
-## Repository structure
-
-```text
-contract/
-  include/
-    hashedlaunch/hashedlaunch.hpp
-    hashedpad/hashedpad.hpp
-  src/
-    hashedlaunch.cpp
-    hashedpad.cpp
-
-tests/
-  launcher.ultra_test.js
-  launchpad.ultra_test.js
-
-web/
-  src/main.ts
-  src/style.css
-
-legacy/
-  raise/
-    ... archived original fundraising launchpad
-```
+- fuzz/property testing of bonding-curve invariants
+- review of price rounding and extreme token sizes
+- protocol fee review
+- RAM/resource model review
+- spam/moderation controls for token metadata
+- public Ultra Testnet soak testing
+- formal graduation/migration design
