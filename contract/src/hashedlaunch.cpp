@@ -4,7 +4,7 @@ void hashedlaunch::create_token(name issuer,
                                 const asset& maximum_supply,
                                 const string& token_name,
                                 const string& metadata_uri) {
-    check(eosio::is_account(issuer), "issuer account does not exist");
+    check(is_account(issuer), "issuer account does not exist");
     check(maximum_supply.is_valid(), "invalid maximum supply");
     check(maximum_supply.amount > 0, "maximum supply must be positive");
     check(maximum_supply.symbol.is_valid(), "invalid token symbol");
@@ -17,8 +17,8 @@ void hashedlaunch::create_token(name issuer,
     auto existing = statstable.find(sym.code().raw());
     check(existing == statstable.end(), "token symbol already exists on this launcher");
 
-    // Creator pays RAM for token state. This prevents arbitrary users from draining
-    // the launcher's RAM simply by creating tokens.
+    // Creator pays RAM for token state. Public production deployments may replace
+    // this with protocol-sponsored RAM plus a launch fee.
     statstable.emplace(issuer, [&](auto& s) {
         s.supply = asset{0, sym};
         s.max_supply = maximum_supply;
@@ -113,7 +113,7 @@ void hashedlaunch::retire(asset quantity, string memo) {
 void hashedlaunch::transfer(name from, name to, asset quantity, string memo) {
     check(from != to, "cannot transfer to self");
     require_auth(from);
-    check(eosio::is_account(to), "recipient account does not exist");
+    check(is_account(to), "recipient account does not exist");
     check(quantity.is_valid(), "invalid quantity");
     check(quantity.amount > 0, "must transfer a positive quantity");
     check(memo.size() <= 256, "memo has more than 256 bytes");
@@ -122,11 +122,13 @@ void hashedlaunch::transfer(name from, name to, asset quantity, string memo) {
     const auto& st = statstable.get(quantity.symbol.code().raw(), "token does not exist");
     check(quantity.symbol == st.supply.symbol, "symbol precision mismatch");
 
-    eosio::require_recipient(from);
-    eosio::require_recipient(to);
+    require_recipient(from);
+    require_recipient(to);
 
     sub_balance(from, quantity);
-    // Sender pays RAM if the receiver does not already have a balance row.
+
+    // The sender sponsors RAM for a new receiver balance row. This keeps the MVP
+    // one-click transferable while preserving the existing payer on later updates.
     add_balance(to, quantity, from);
 }
 
@@ -138,13 +140,14 @@ void hashedlaunch::sub_balance(name owner, const asset& value) {
     if (from.balance.amount == value.amount) {
         from_acnts.erase(from);
     } else {
-        from_acnts.modify(from, owner, [&](auto& a) { a.balance -= value; });
+        from_acnts.modify(from, same_payer, [&](auto& a) { a.balance -= value; });
     }
 }
 
 void hashedlaunch::add_balance(name owner, const asset& value, name ram_payer) {
     accounts to_acnts(get_self(), owner.value);
     auto to = to_acnts.find(value.symbol.code().raw());
+
     if (to == to_acnts.end()) {
         to_acnts.emplace(ram_payer, [&](auto& a) { a.balance = value; });
     } else {
@@ -154,7 +157,7 @@ void hashedlaunch::add_balance(name owner, const asset& value, name ram_payer) {
 
 void hashedlaunch::open(name owner, const symbol& sym, name ram_payer) {
     require_auth(ram_payer);
-    check(eosio::is_account(owner), "owner account does not exist");
+    check(is_account(owner), "owner account does not exist");
 
     stats statstable(get_self(), sym.code().raw());
     const auto& st = statstable.get(sym.code().raw(), "token does not exist");
@@ -162,6 +165,7 @@ void hashedlaunch::open(name owner, const symbol& sym, name ram_payer) {
 
     accounts acnts(get_self(), owner.value);
     auto it = acnts.find(sym.code().raw());
+
     if (it == acnts.end()) {
         acnts.emplace(ram_payer, [&](auto& a) { a.balance = asset{0, sym}; });
     }
