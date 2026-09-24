@@ -1,23 +1,33 @@
 import { UltraWalletSDK } from '@ultraos/wallet-sdk';
 import './style.css';
 
-const TOKEN_CONTRACT = import.meta.env.VITE_CONTRACT_ACCOUNT || 'hashedlaunch';
+const TOKEN_FACTORY =
+  import.meta.env.VITE_TOKEN_FACTORY_ACCOUNT ||
+  import.meta.env.VITE_CONTRACT_ACCOUNT ||
+  'hashedlaunch';
 const PAD_CONTRACT = import.meta.env.VITE_LAUNCHPAD_ACCOUNT || 'hashedpad';
 const PAYMENT_CONTRACT = import.meta.env.VITE_PAYMENT_CONTRACT || 'eosio.token';
 const PAYMENT_SYMBOL = import.meta.env.VITE_PAYMENT_SYMBOL || 'UOS';
 const PAYMENT_DECIMALS = Number(import.meta.env.VITE_PAYMENT_DECIMALS || 8);
-const RPC_URL = import.meta.env.VITE_ULTRA_RPC_URL || 'https://test.ultra.eosusa.io';
+const RPC_URL = import.meta.env.VITE_ULTRA_RPC_URL || 'https://ultra-testnet.eosphere.io';
 
 const ULTRA_MAINNET_CHAIN_ID =
   'a9c481dfbc7d9506dc7e87e9a137c931b0a9303f64fd7a1d08b8230133920097';
 const ULTRA_TESTNET_CHAIN_ID =
   '7fc56be645bb76ab9d747b53089f132dcb7681db06f0852cfa03eaf6f7ac80e9';
 
-const wallet = new UltraWalletSDK({ environment: 'testnet', provider: 'extension' });
-const MAX_ASSET_AMOUNT = (1n << 62n) - 1n;
+// Protocol defaults stay out of the creator UX.
+const TOKEN_DECIMALS = 8;
+const TOTAL_SUPPLY = '1000000000';
+const CURVE_ALLOCATION = '1000000000';
+const START_PRICE = '0.000001';
+const END_PRICE = '0.000010';
+const GRADUATION_TARGET = '5000';
 
+const wallet = new UltraWalletSDK({ environment: 'testnet', provider: 'extension' });
 let account: string | undefined;
-let selectedMarketId: number | undefined;
+let selectedMarket: MarketRow | undefined;
+let activeFilter: 'new' | 'trending' | 'graduating' | 'graduated' = 'new';
 
 type StatusKind = 'ok' | 'error' | 'info';
 
@@ -54,272 +64,178 @@ const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = `
   <main class="shell">
     <nav>
-      <div class="brand"><span class="mark">H</span> HASHED</div>
-      <div class="tabs" aria-label="Hashed products">
-        <button class="tab active" data-tab="launcher">Token Launcher</button>
-        <button class="tab" data-tab="launchpad">Meme Launchpad</button>
+      <div class="brand"><span class="brand-mark">H40</span><strong>HASHED40</strong></div>
+      <div class="nav-links">
+        <button class="nav-link active" data-scroll="discover">Explore</button>
+        <button class="nav-link" data-scroll="create">Create coin</button>
       </div>
       <button id="connect" class="wallet">Connect Ultra Wallet</button>
     </nav>
 
     <section class="hero">
-      <div class="eyebrow">ULTRA TESTNET · TOKEN LAUNCHER + MEME LAUNCHPAD</div>
-      <h1>Create it.<br/>Launch it on Ultra.</h1>
-      <p>Create a native Ultra token, then launch it on Hashed's UOS bonding curve. No fundraising campaign flow and no DEX dependency.</p>
+      <div class="eyebrow">MEME COINS · NATIVE ON ULTRA</div>
+      <h1>Launch a coin.<br/>Trade it instantly.</h1>
+      <p>Pick a name, ticker and logo. Hashed40 handles the token creation and bonding curve behind the scenes.</p>
+      <button id="hero-create" class="hero-button">Create a coin</button>
     </section>
 
-    <section id="launcher-panel" class="panel active">
-      <section class="card">
-        <div class="form-head">
-          <div><span class="step">01</span><h2>Create a token</h2></div>
-          <span class="network">ULTRA TESTNET</span>
+    <section id="create" class="create-section">
+      <div class="section-head">
+        <div>
+          <span class="kicker">CREATE</span>
+          <h2>Launch your coin</h2>
         </div>
+        <span class="pill">Ultra Testnet</span>
+      </div>
 
-        <form id="token-form">
-          <div class="grid2">
-            <label>Token name<input id="token-name" maxlength="64" placeholder="Ultra Dog" required /></label>
-            <label>Symbol<input id="token-symbol" maxlength="7" placeholder="UDOG" pattern="[A-Z]{1,7}" required /></label>
-          </div>
-
-          <div class="grid2">
-            <label>Maximum supply<input id="token-max" inputmode="decimal" value="1000000000" required /></label>
-            <label>Initial supply<input id="token-initial" inputmode="decimal" value="1000000000" required /></label>
-          </div>
-
-          <div class="grid2">
-            <label>Decimals
-              <select id="token-decimals">
-                <option>4</option>
-                <option>6</option>
-                <option selected>8</option>
-              </select>
-            </label>
-            <label>Metadata URI <span>(optional)</span>
-              <input id="token-uri" maxlength="256" placeholder="ipfs://..." />
-            </label>
-          </div>
-
-          <div class="summary">
-            <div><span>Issuer</span><strong id="issuer">Not connected</strong></div>
-            <div><span>Contract</span><strong>${TOKEN_CONTRACT}</strong></div>
-            <div><span>Network</span><strong>Ultra Testnet</strong></div>
-          </div>
-
-          <button id="create-token" class="primary" type="submit" disabled>Connect wallet to create token</button>
-        </form>
-
-        <div id="token-status" class="status"></div>
-      </section>
-    </section>
-
-    <section id="launchpad-panel" class="panel">
-      <section class="card">
-        <div class="form-head">
-          <div><span class="step">02</span><h2>Create a meme market</h2></div>
-          <span class="network">BONDING CURVE</span>
-        </div>
-
-        <form id="market-form">
-          <div class="grid3">
-            <label>Display name<input id="market-name" maxlength="64" placeholder="Ultra Dog" required /></label>
-            <label>Token symbol<input id="market-symbol" maxlength="7" placeholder="UDOG" pattern="[A-Z]{1,7}" required /></label>
-            <label>Token decimals
-              <select id="market-decimals">
-                <option>4</option>
-                <option>6</option>
-                <option selected>8</option>
-              </select>
-            </label>
-          </div>
-
-          <div class="grid3">
-            <label>Curve token allocation<input id="market-allocation" inputmode="decimal" value="800000000" required /></label>
-            <label>Start price (${PAYMENT_SYMBOL}/token)<input id="market-start-price" inputmode="decimal" value="0.000001" required /></label>
-            <label>End price (${PAYMENT_SYMBOL}/token)<input id="market-end-price" inputmode="decimal" value="0.00001" required /></label>
-          </div>
-
-          <div class="grid2">
-            <label>Graduation target (${PAYMENT_SYMBOL})<input id="market-graduation" inputmode="decimal" value="5000" required /></label>
-            <label>Token image URI<input id="market-image" maxlength="256" placeholder="ipfs://..." /></label>
-          </div>
-
-          <label>Description<textarea id="market-description" maxlength="512" placeholder="What is this token about?"></textarea></label>
-
-          <div class="grid3">
-            <label>Website<input id="market-website" maxlength="256" placeholder="https://..." /></label>
-            <label>X / Twitter<input id="market-x" maxlength="256" placeholder="https://x.com/..." /></label>
-            <label>Telegram<input id="market-telegram" maxlength="256" placeholder="https://t.me/..." /></label>
-          </div>
-
-          <div class="summary">
-            <div><span>Creator</span><strong id="market-creator">Not connected</strong></div>
-            <div><span>Payment</span><strong>${PAYMENT_SYMBOL}</strong></div>
-            <div><span>Launchpad</span><strong>${PAD_CONTRACT}</strong></div>
-          </div>
-
-          <button id="create-market" class="primary" type="submit" disabled>Create meme market</button>
-        </form>
-
-        <div id="market-status" class="status"></div>
-      </section>
-
-      <section class="card">
-        <div class="form-head">
-          <div><span class="step">03</span><h2>Seed and go live</h2></div>
-          <span class="network">CREATOR</span>
-        </div>
-
-        <div class="grid3">
-          <label>Market ID<input id="manage-market-id" inputmode="numeric" placeholder="1" /></label>
-          <label>Token symbol<input id="manage-symbol" maxlength="7" placeholder="UDOG" /></label>
-          <label>Token decimals
-            <select id="manage-decimals">
-              <option>4</option>
-              <option>6</option>
-              <option selected>8</option>
-            </select>
+      <form id="coin-form" class="create-card">
+        <div class="logo-field">
+          <div id="logo-preview" class="logo-preview">+</div>
+          <label>Logo URL
+            <input id="coin-logo" maxlength="256" placeholder="https://... or ipfs://..." />
           </label>
         </div>
 
         <div class="grid2">
-          <label>Token allocation<input id="manage-allocation" inputmode="decimal" value="800000000" /></label>
-          <button id="seed-market" class="secondary action-button" type="button" disabled>Deposit curve tokens</button>
+          <label>Name
+            <input id="coin-name" maxlength="64" placeholder="Ultra Dog" required />
+          </label>
+          <label>Ticker
+            <input id="coin-symbol" maxlength="7" placeholder="UDOG" pattern="[A-Z]{1,7}" required />
+          </label>
         </div>
 
-        <div class="button-grid two">
-          <button id="activate-market" class="primary" type="button" disabled>Activate market</button>
-          <button id="settle-market" class="secondary" type="button" disabled>Settle graduated market</button>
-        </div>
-
-        <div id="manage-status" class="status"></div>
-      </section>
-
-      <section class="card">
-        <div class="form-head">
-          <div><span class="step">04</span><h2>Live launches</h2></div>
-          <button id="refresh-markets" class="secondary compact" type="button">Refresh</button>
-        </div>
-
-        <div id="markets-empty" class="empty">No launch markets found yet.</div>
-        <div id="markets-grid" class="market-grid"></div>
-        <div id="markets-status" class="status"></div>
-      </section>
-
-      <section class="card trade-card">
-        <div class="form-head">
-          <div><span class="step">05</span><h2>Buy / sell on the curve</h2></div>
-          <span id="selected-market-label" class="network">SELECT MARKET</span>
-        </div>
-
-        <div class="grid2">
-          <label>Market ID<input id="trade-market-id" inputmode="numeric" placeholder="Select a market above" /></label>
-          <label>Token symbol<input id="trade-symbol" maxlength="7" placeholder="UDOG" /></label>
-        </div>
-
-        <div class="grid2">
-          <label>Buy with ${PAYMENT_SYMBOL}<input id="buy-amount" inputmode="decimal" value="10" /></label>
-          <button id="buy-market" class="primary action-button" type="button" disabled>Buy token</button>
-        </div>
+        <label>Description
+          <textarea id="coin-description" maxlength="512" placeholder="Tell Ultra what this coin is about."></textarea>
+        </label>
 
         <div class="grid3">
-          <label>Sell token amount<input id="sell-amount" inputmode="decimal" value="1000" /></label>
-          <label>Token decimals
-            <select id="trade-decimals">
-              <option>4</option>
-              <option>6</option>
-              <option selected>8</option>
-            </select>
+          <label>Website <span>optional</span>
+            <input id="coin-website" maxlength="256" placeholder="https://..." />
           </label>
-          <button id="sell-market" class="secondary action-button" type="button" disabled>Sell token</button>
+          <label>X <span>optional</span>
+            <input id="coin-x" maxlength="256" placeholder="https://x.com/..." />
+          </label>
+          <label>Telegram <span>optional</span>
+            <input id="coin-telegram" maxlength="256" placeholder="https://t.me/..." />
+          </label>
+        </div>
+
+        <div class="initial-buy">
+          <div>
+            <strong>Initial buy</strong>
+            <span>Optional. Be the first buyer when your coin goes live.</span>
+          </div>
+          <div class="amount-input">
+            <input id="initial-buy" inputmode="decimal" value="0" />
+            <span>${PAYMENT_SYMBOL}</span>
+          </div>
+        </div>
+
+        <div class="launch-note">
+          <strong>One launch flow.</strong>
+          <span>Hashed40 will create the token through HashTL, create its curve, seed the supply and activate trading. Your wallet will ask you to approve the required Ultra transactions.</span>
+        </div>
+
+        <button id="launch-coin" class="primary" type="submit" disabled>Connect wallet to launch</button>
+        <div id="launch-status" class="status"></div>
+      </form>
+    </section>
+
+    <section id="discover" class="discover-section">
+      <div class="section-head">
+        <div>
+          <span class="kicker">DISCOVER</span>
+          <h2>Coins on Hashed40</h2>
+        </div>
+        <button id="refresh" class="ghost">Refresh</button>
+      </div>
+
+      <div class="filters">
+        <button class="filter active" data-filter="new">New</button>
+        <button class="filter" data-filter="trending">Trending</button>
+        <button class="filter" data-filter="graduating">Graduating</button>
+        <button class="filter" data-filter="graduated">Graduated</button>
+      </div>
+
+      <div id="market-grid" class="market-grid"></div>
+      <div id="market-empty" class="empty">No coins here yet.</div>
+      <div id="market-status" class="status"></div>
+    </section>
+
+    <section id="trade" class="trade-section hidden">
+      <div class="trade-header">
+        <div class="trade-token">
+          <div id="trade-logo" class="trade-logo">H40</div>
+          <div>
+            <span id="trade-ticker">$COIN</span>
+            <h2 id="trade-name">Select a coin</h2>
+          </div>
+        </div>
+        <span id="trade-state" class="pill">LIVE</span>
+      </div>
+
+      <p id="trade-description" class="trade-description"></p>
+
+      <div class="trade-stats">
+        <div><span>Price</span><strong id="trade-price">—</strong></div>
+        <div><span>Reserve</span><strong id="trade-reserve">—</strong></div>
+        <div><span>Volume</span><strong id="trade-volume">—</strong></div>
+        <div><span>Graduation</span><strong id="trade-progress">—</strong></div>
+      </div>
+
+      <div class="curve-progress"><i id="trade-progress-bar"></i></div>
+
+      <div class="trade-box">
+        <div class="trade-tabs">
+          <button id="buy-tab" class="trade-tab active">Buy</button>
+          <button id="sell-tab" class="trade-tab">Sell</button>
+        </div>
+
+        <div id="buy-panel">
+          <label>Spend
+            <div class="asset-input">
+              <input id="buy-amount" inputmode="decimal" value="10" />
+              <span>${PAYMENT_SYMBOL}</span>
+            </div>
+          </label>
+          <button id="buy-button" class="primary" disabled>Buy</button>
+        </div>
+
+        <div id="sell-panel" class="hidden">
+          <label>Sell amount
+            <div class="asset-input">
+              <input id="sell-amount" inputmode="decimal" value="1000" />
+              <span id="sell-symbol">COIN</span>
+            </div>
+          </label>
+          <button id="sell-button" class="primary" disabled>Sell</button>
         </div>
 
         <div id="trade-status" class="status"></div>
-      </section>
+      </div>
     </section>
 
-    <footer>Hashed · Native token creation + meme launches on Ultra</footer>
+    <footer>Hashed40 · Meme launches on Ultra</footer>
   </main>
 `;
 
 const connectButton = document.querySelector<HTMLButtonElement>('#connect')!;
-const tokenButton = document.querySelector<HTMLButtonElement>('#create-token')!;
-const marketButton = document.querySelector<HTMLButtonElement>('#create-market')!;
-const issuer = document.querySelector<HTMLElement>('#issuer')!;
-const marketCreator = document.querySelector<HTMLElement>('#market-creator')!;
-
-const connectedButtons = Array.from(
-  document.querySelectorAll<HTMLButtonElement>(
-    '#create-token, #create-market, #seed-market, #activate-market, #settle-market, #buy-market, #sell-market',
-  ),
-);
-
-function statusElement(selector: string): HTMLElement {
-  return document.querySelector<HTMLElement>(selector)!;
-}
+const launchButton = document.querySelector<HTMLButtonElement>('#launch-coin')!;
+const buyButton = document.querySelector<HTMLButtonElement>('#buy-button')!;
+const sellButton = document.querySelector<HTMLButtonElement>('#sell-button')!;
 
 function showStatus(target: HTMLElement, message: string, kind: StatusKind = 'info') {
   target.className = `status ${kind}`;
   target.textContent = message;
 }
 
-function utf8Length(value: string): number {
-  return new TextEncoder().encode(value).length;
-}
-
-function parseAmount(raw: string, decimals: number): { atomic: bigint; normalized: string } {
-  const value = raw.trim();
-
-  if (!/^\d+(\.\d+)?$/.test(value)) {
-    throw new Error('Enter a decimal amount using numbers only.');
-  }
-
-  const [wholeRaw, fractionRaw = ''] = value.split('.');
-
-  if (fractionRaw.length > decimals) {
-    throw new Error(`Amount supports at most ${decimals} decimal places.`);
-  }
-
-  const whole = wholeRaw.replace(/^0+(?=\d)/, '') || '0';
-  const fraction = fractionRaw.padEnd(decimals, '0');
-  const atomicText = `${whole}${fraction}`.replace(/^0+(?=\d)/, '') || '0';
-  const atomic = BigInt(atomicText);
-
-  if (atomic > MAX_ASSET_AMOUNT) {
-    throw new Error('Amount exceeds the maximum value supported by an Antelope asset.');
-  }
-
-  return {
-    atomic,
-    normalized: decimals > 0 ? `${whole}.${fraction}` : whole,
-  };
-}
-
-function formatAsset(raw: string, decimals: number, symbol: string): { atomic: bigint; asset: string } {
-  const parsed = parseAmount(raw, decimals);
-  return { atomic: parsed.atomic, asset: `${parsed.normalized} ${symbol}` };
-}
-
-function assetNumber(asset: string): number {
-  return Number(asset.split(' ')[0]);
-}
-
-function symbolPrecision(symbol: string): number {
-  return Number(symbol.split(',')[0]);
-}
-
-function symbolCode(symbol: string): string {
-  return symbol.split(',')[1] || '';
-}
-
-function walletErrorCode(err: unknown): number | undefined {
-  if (typeof err !== 'object' || err === null) return undefined;
-  const candidate = err as { code?: unknown };
-  return typeof candidate.code === 'number' ? candidate.code : undefined;
+function status(selector: string): HTMLElement {
+  return document.querySelector<HTMLElement>(selector)!;
 }
 
 function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
-
   if (typeof err === 'object' && err !== null) {
     const candidate = err as {
       message?: string;
@@ -327,75 +243,64 @@ function errorMessage(err: unknown): string {
     };
 
     if (typeof candidate.data === 'string') return candidate.data;
-
     if (candidate.data && typeof candidate.data === 'object') {
-      return candidate.data.message ?? candidate.data.error?.what ?? candidate.message ?? 'Wallet request failed.';
+      return candidate.data.message ?? candidate.data.error?.what ?? candidate.message ?? 'Transaction failed.';
     }
+    return candidate.message ?? 'Transaction failed.';
+  }
+  return 'Transaction failed.';
+}
 
-    return candidate.message ?? 'Wallet request failed.';
+function utf8Length(value: string): number {
+  return new TextEncoder().encode(value).length;
+}
+
+function formatAmount(raw: string, decimals: number, symbol: string): string {
+  const value = raw.trim();
+  if (!/^\d+(\.\d+)?$/.test(value)) throw new Error('Enter a valid amount.');
+
+  const [wholeRaw, fractionRaw = ''] = value.split('.');
+  if (fractionRaw.length > decimals) {
+    throw new Error(`Amount supports at most ${decimals} decimal places.`);
   }
 
-  return 'Wallet request failed.';
+  const whole = wholeRaw.replace(/^0+(?=\d)/, '') || '0';
+  const fraction = fractionRaw.padEnd(decimals, '0');
+  return `${whole}.${fraction} ${symbol}`;
 }
 
-function setWalletControls(enabled: boolean) {
-  connectedButtons.forEach((button) => {
-    button.disabled = !enabled;
-  });
+function assetNumber(asset: string): number {
+  return Number(asset.split(' ')[0]);
 }
 
-function requiredAccount(): string {
+function symbolCode(symbol: string): string {
+  return symbol.split(',')[1] || '';
+}
+
+function symbolPrecision(symbol: string): number {
+  return Number(symbol.split(',')[0]);
+}
+
+function imageUrl(uri: string): string | undefined {
+  if (!uri) return undefined;
+  if (uri.startsWith('ipfs://')) return `https://ipfs.io/ipfs/${uri.slice(7)}`;
+  if (/^https?:\/\//i.test(uri)) return uri;
+  return undefined;
+}
+
+function setConnected(enabled: boolean) {
+  launchButton.disabled = !enabled;
+  buyButton.disabled = !enabled || !selectedMarket || selectedMarket.status !== 1;
+  sellButton.disabled = !enabled || !selectedMarket || selectedMarket.status !== 1;
+
+  if (enabled) launchButton.textContent = 'Launch coin';
+}
+
+async function sign(contract: string, action: string, data: Record<string, unknown>): Promise<string> {
   if (!account) throw new Error('Connect your Ultra Wallet first.');
-  return account;
-}
-
-function positiveId(selector: string): number {
-  const raw = document.querySelector<HTMLInputElement>(selector)!.value.trim();
-  const id = Number(raw);
-
-  if (!Number.isSafeInteger(id) || id <= 0) {
-    throw new Error('Enter a valid market ID.');
-  }
-
-  return id;
-}
-
-async function signTransaction(
-  contract: string,
-  action: string,
-  data: Record<string, unknown>,
-): Promise<string> {
-  requiredAccount();
 
   const response = await wallet.signTransaction({ contract, action, data });
-  const hash = response.data.transactionHash;
-
-  if (!hash) {
-    throw new Error('Ultra Wallet submitted the transaction without returning a transaction hash.');
-  }
-
-  return hash;
-}
-
-async function withButton(
-  button: HTMLButtonElement,
-  target: HTMLElement,
-  pendingText: string,
-  fn: () => Promise<string>,
-) {
-  const original = button.textContent || '';
-  button.disabled = true;
-  button.textContent = pendingText;
-
-  try {
-    const hash = await fn();
-    showStatus(target, `Transaction submitted: ${hash}`, 'ok');
-  } catch (err: unknown) {
-    showStatus(target, errorMessage(err), 'error');
-  } finally {
-    button.disabled = !account;
-    button.textContent = original;
-  }
+  return response.data.transactionHash || 'submitted';
 }
 
 async function fetchMarkets(): Promise<MarketRow[]> {
@@ -411,456 +316,415 @@ async function fetchMarkets(): Promise<MarketRow[]> {
     }),
   });
 
-  if (!response.ok) {
-    throw new Error(`Could not load markets from Ultra RPC (${response.status}).`);
-  }
-
+  if (!response.ok) throw new Error(`Ultra RPC returned ${response.status}.`);
   const payload = (await response.json()) as { rows?: MarketRow[] };
   return payload.rows ?? [];
 }
 
-function statusName(status: number): string {
-  if (status === 0) return 'Draft';
-  if (status === 1) return 'Live';
-  if (status === 2) return 'Graduated';
-  if (status === 3) return 'Closed';
-  return 'Unknown';
+function progress(market: MarketRow): number {
+  const target = assetNumber(market.graduation_target);
+  if (target <= 0) return 0;
+  return Math.min(100, (assetNumber(market.reserve) / target) * 100);
 }
 
-function marketCurrentPrice(market: MarketRow): number {
+function currentPrice(market: MarketRow): number {
+  const allocation = assetNumber(market.token_allocation);
+  const sold = assetNumber(market.sold);
   const start = assetNumber(market.start_price);
   const end = assetNumber(market.end_price);
-  const sold = assetNumber(market.sold);
-  const allocation = assetNumber(market.token_allocation);
   const ratio = allocation > 0 ? Math.min(1, sold / allocation) : 0;
   return start + (end - start) * ratio;
 }
 
+function filterMarkets(markets: MarketRow[]): MarketRow[] {
+  const copy = markets.slice();
+
+  if (activeFilter === 'graduated') {
+    return copy.filter((m) => m.status === 2).sort((a, b) => b.graduated_at - a.graduated_at);
+  }
+
+  if (activeFilter === 'graduating') {
+    return copy
+      .filter((m) => m.status === 1)
+      .sort((a, b) => progress(b) - progress(a));
+  }
+
+  if (activeFilter === 'trending') {
+    return copy
+      .filter((m) => m.status === 1)
+      .sort((a, b) => assetNumber(b.volume) - assetNumber(a.volume));
+  }
+
+  return copy.sort((a, b) => b.created_at - a.created_at);
+}
+
 function renderMarkets(markets: MarketRow[]) {
-  const grid = document.querySelector<HTMLDivElement>('#markets-grid')!;
-  const empty = document.querySelector<HTMLDivElement>('#markets-empty')!;
+  const grid = document.querySelector<HTMLDivElement>('#market-grid')!;
+  const empty = document.querySelector<HTMLDivElement>('#market-empty')!;
+  const filtered = filterMarkets(markets);
 
   grid.innerHTML = '';
-  empty.style.display = markets.length ? 'none' : 'block';
+  empty.style.display = filtered.length ? 'none' : 'block';
 
-  markets
-    .slice()
-    .reverse()
-    .forEach((market) => {
-      const id = Number(market.id);
-      const code = symbolCode(market.token_symbol);
-      const precision = symbolPrecision(market.token_symbol);
-      const reserve = assetNumber(market.reserve);
-      const target = assetNumber(market.graduation_target);
-      const progress = target > 0 ? Math.min(100, (reserve / target) * 100) : 0;
-      const price = marketCurrentPrice(market);
+  for (const market of filtered) {
+    const ticker = symbolCode(market.token_symbol);
+    const pct = progress(market);
+    const logo = imageUrl(market.image_uri);
 
-      const card = document.createElement('button');
-      card.type = 'button';
-      card.className = `market-card ${selectedMarketId === id ? 'selected' : ''}`;
-      card.innerHTML = `
-        <div class="market-card-head">
-          <div class="token-avatar">${market.image_uri ? '<span>IMG</span>' : code.slice(0, 2)}</div>
-          <div>
-            <strong>${market.display_name}</strong>
-            <span>${code} · #${id}</span>
-          </div>
-          <span class="market-status status-${market.status}">${statusName(market.status)}</span>
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'coin-card';
+    card.innerHTML = `
+      <div class="coin-card-top">
+        <div class="coin-logo">${logo ? `<img src="${logo}" alt="" />` : ticker.slice(0, 2)}</div>
+        <div class="coin-title">
+          <strong>${market.display_name}</strong>
+          <span>$${ticker}</span>
         </div>
-        <p>${market.description || 'Meme token launched on Ultra.'}</p>
-        <div class="market-stats">
-          <div><span>Price</span><strong>${price.toFixed(PAYMENT_DECIMALS)} ${PAYMENT_SYMBOL}</strong></div>
-          <div><span>Reserve</span><strong>${reserve.toFixed(4)} ${PAYMENT_SYMBOL}</strong></div>
-          <div><span>Volume</span><strong>${assetNumber(market.volume).toFixed(4)} ${PAYMENT_SYMBOL}</strong></div>
-        </div>
-        <div class="progress"><i style="width:${progress}%"></i></div>
-        <div class="progress-label"><span>Graduation</span><strong>${progress.toFixed(1)}%</strong></div>
-      `;
+        <span class="coin-state ${market.status === 2 ? 'graduated' : ''}">
+          ${market.status === 2 ? 'Graduated' : 'Live'}
+        </span>
+      </div>
+      <p>${market.description || 'Launched on Hashed40.'}</p>
+      <div class="coin-numbers">
+        <div><span>Price</span><strong>${currentPrice(market).toFixed(8)} ${PAYMENT_SYMBOL}</strong></div>
+        <div><span>Volume</span><strong>${assetNumber(market.volume).toFixed(2)} ${PAYMENT_SYMBOL}</strong></div>
+      </div>
+      <div class="mini-progress"><i style="width:${pct}%"></i></div>
+      <div class="progress-row"><span>Bonding curve</span><strong>${pct.toFixed(1)}%</strong></div>
+    `;
 
-      card.addEventListener('click', () => {
-        selectedMarketId = id;
-        document.querySelector<HTMLInputElement>('#trade-market-id')!.value = String(id);
-        document.querySelector<HTMLInputElement>('#trade-symbol')!.value = code;
-        document.querySelector<HTMLSelectElement>('#trade-decimals')!.value = String(precision);
-        document.querySelector<HTMLElement>('#selected-market-label')!.textContent = `#${id} · ${code}`;
-
-        renderMarkets(markets);
-      });
-
-      grid.appendChild(card);
-    });
+    card.addEventListener('click', () => selectMarket(market));
+    grid.appendChild(card);
+  }
 }
 
 async function refreshMarkets() {
-  const target = statusElement('#markets-status');
+  const target = status('#market-status');
 
   try {
-    showStatus(target, 'Loading Ultra launch markets…');
     const markets = await fetchMarkets();
     renderMarkets(markets);
-    showStatus(target, `${markets.length} market${markets.length === 1 ? '' : 's'} loaded.`, 'ok');
+
+    if (selectedMarket) {
+      const fresh = markets.find((m) => Number(m.id) === Number(selectedMarket!.id));
+      if (fresh) selectMarket(fresh, false);
+    }
+
+    showStatus(target, `${markets.length} coin${markets.length === 1 ? '' : 's'} loaded.`, 'ok');
   } catch (err: unknown) {
     showStatus(target, errorMessage(err), 'error');
   }
 }
 
-async function latestMarketForCreator(creator: string): Promise<MarketRow | undefined> {
-  const markets = await fetchMarkets();
-  return markets
-    .filter((market) => market.creator === creator)
-    .sort((a, b) => Number(b.id) - Number(a.id))[0];
+function selectMarket(market: MarketRow, scroll = true) {
+  selectedMarket = market;
+  const ticker = symbolCode(market.token_symbol);
+  const pct = progress(market);
+  const logo = imageUrl(market.image_uri);
+
+  document.querySelector<HTMLElement>('#trade')!.classList.remove('hidden');
+  document.querySelector<HTMLElement>('#trade-ticker')!.textContent = `$${ticker}`;
+  document.querySelector<HTMLElement>('#trade-name')!.textContent = market.display_name;
+  document.querySelector<HTMLElement>('#trade-description')!.textContent = market.description || '';
+  document.querySelector<HTMLElement>('#trade-state')!.textContent =
+    market.status === 2 ? 'GRADUATED' : 'LIVE';
+  document.querySelector<HTMLElement>('#trade-price')!.textContent =
+    `${currentPrice(market).toFixed(8)} ${PAYMENT_SYMBOL}`;
+  document.querySelector<HTMLElement>('#trade-reserve')!.textContent =
+    `${assetNumber(market.reserve).toFixed(2)} ${PAYMENT_SYMBOL}`;
+  document.querySelector<HTMLElement>('#trade-volume')!.textContent =
+    `${assetNumber(market.volume).toFixed(2)} ${PAYMENT_SYMBOL}`;
+  document.querySelector<HTMLElement>('#trade-progress')!.textContent = `${pct.toFixed(1)}%`;
+  (document.querySelector<HTMLElement>('#trade-progress-bar')!).style.width = `${pct}%`;
+  document.querySelector<HTMLElement>('#sell-symbol')!.textContent = ticker;
+
+  const logoElement = document.querySelector<HTMLElement>('#trade-logo')!;
+  logoElement.innerHTML = logo ? `<img src="${logo}" alt="" />` : ticker.slice(0, 2);
+
+  setConnected(Boolean(account));
+
+  if (scroll) {
+    document.querySelector<HTMLElement>('#trade')!.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 }
 
-document.querySelectorAll<HTMLButtonElement>('.tab').forEach((button) => {
-  button.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach((tab) => tab.classList.remove('active'));
-    document.querySelectorAll('.panel').forEach((panel) => panel.classList.remove('active'));
+async function waitForMarket(creator: string, symbol: string): Promise<MarketRow> {
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const markets = await fetchMarkets();
+    const match = markets
+      .filter(
+        (m) =>
+          m.creator === creator &&
+          symbolCode(m.token_symbol) === symbol &&
+          m.status === 0,
+      )
+      .sort((a, b) => Number(b.id) - Number(a.id))[0];
 
-    button.classList.add('active');
-    document.querySelector<HTMLElement>(`#${button.dataset.tab}-panel`)!.classList.add('active');
-
-    if (button.dataset.tab === 'launchpad') void refreshMarkets();
-  });
-});
-
-connectButton.addEventListener('click', async () => {
-  const target = statusElement('#token-status');
-
-  if (!('ultra' in window)) {
-    showStatus(
-      target,
-      'Ultra Wallet Extension was not detected. Testnet requires the Ultra browser extension.',
-      'error',
-    );
-    return;
+    if (match) return match;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 
+  throw new Error('Coin was created, but the new Hashed40 market has not appeared in the Ultra RPC yet. Refresh in a moment.');
+}
+
+connectButton.addEventListener('click', async () => {
   connectButton.disabled = true;
+  const target = status('#launch-status');
 
   try {
-    showStatus(target, 'Checking Ultra Wallet network…');
+    if (!('ultra' in window)) throw new Error('Ultra Wallet Extension was not detected.');
 
-    const chainResponse = await wallet.getChainId();
-    const currentChainId = chainResponse.data;
+    const chain = await wallet.getChainId();
 
-    if (currentChainId !== ULTRA_TESTNET_CHAIN_ID) {
-      const currentNetwork =
-        currentChainId === ULTRA_MAINNET_CHAIN_ID ? 'Mainnet' : 'another network';
-
-      showStatus(
-        target,
-        `Ultra Wallet is on ${currentNetwork}. Trying to switch to Ultra Testnet…`,
-        'info',
-      );
+    if (chain.data !== ULTRA_TESTNET_CHAIN_ID) {
+      if (chain.data === ULTRA_MAINNET_CHAIN_ID) {
+        showStatus(target, 'Ultra Wallet is on Mainnet. Switching to Testnet…');
+      }
 
       try {
         await wallet.switchNetwork(ULTRA_TESTNET_CHAIN_ID);
-      } catch (switchErr: unknown) {
-        if (walletErrorCode(switchErr) === 4100) {
-          throw new Error(
-            'Your wallet is on Ultra Mainnet. Open Ultra Wallet → Networks → Testnet, switch to Testnet, then click Connect again.',
-          );
-        }
-
-        throw new Error(
-          `Could not switch Ultra Wallet to Testnet automatically. Switch it manually in the extension, then try again. ${errorMessage(switchErr)}`,
-        );
-      }
-
-      const switched = await wallet.getChainId();
-      if (switched.data !== ULTRA_TESTNET_CHAIN_ID) {
-        throw new Error('Ultra Wallet did not switch to Testnet. Switch networks in the extension and try again.');
+      } catch {
+        throw new Error('Open Ultra Wallet → Networks → Testnet, switch to Testnet, then connect again.');
       }
     }
 
     const { data } = await wallet.connect();
     account = data.blockchainid;
 
-    if (!account) {
-      throw new Error('Ultra Testnet is selected, but the wallet did not return a Testnet account.');
-    }
+    if (!account) throw new Error('Ultra Testnet account was not returned by the wallet.');
 
     connectButton.textContent = account;
-    issuer.textContent = account;
-    marketCreator.textContent = account;
-    setWalletControls(true);
+    setConnected(true);
     showStatus(target, 'Wallet connected to Ultra Testnet.', 'ok');
   } catch (err: unknown) {
     account = undefined;
-    setWalletControls(false);
+    setConnected(false);
     showStatus(target, errorMessage(err), 'error');
   } finally {
     connectButton.disabled = false;
   }
 });
 
-document.querySelector<HTMLFormElement>('#token-form')!.addEventListener('submit', async (event) => {
-  event.preventDefault();
-
-  const target = statusElement('#token-status');
-
-  try {
-    const creator = requiredAccount();
-    const name = document.querySelector<HTMLInputElement>('#token-name')!.value.trim();
-    const symbol = document.querySelector<HTMLInputElement>('#token-symbol')!.value.trim().toUpperCase();
-    const decimals = Number(document.querySelector<HTMLSelectElement>('#token-decimals')!.value);
-    const maximum = formatAsset(
-      document.querySelector<HTMLInputElement>('#token-max')!.value,
-      decimals,
-      symbol,
-    );
-    const initial = formatAsset(
-      document.querySelector<HTMLInputElement>('#token-initial')!.value,
-      decimals,
-      symbol,
-    );
-    const uri = document.querySelector<HTMLInputElement>('#token-uri')!.value.trim();
-
-    if (utf8Length(name) === 0 || utf8Length(name) > 64) {
-      throw new Error('Token name must be between 1 and 64 UTF-8 bytes.');
-    }
-
-    if (!/^[A-Z]{1,7}$/.test(symbol)) {
-      throw new Error('Symbol must be 1–7 uppercase A–Z characters.');
-    }
-
-    if (maximum.atomic <= 0n) throw new Error('Maximum supply must be greater than zero.');
-    if (initial.atomic > maximum.atomic) throw new Error('Initial supply cannot exceed maximum supply.');
-    if (utf8Length(uri) > 256) throw new Error('Metadata URI must be at most 256 UTF-8 bytes.');
-
-    await withButton(tokenButton, target, 'Confirm in wallet…', () =>
-      signTransaction(TOKEN_CONTRACT, 'launch', {
-        issuer: creator,
-        maximum_supply: maximum.asset,
-        initial_supply: initial.asset,
-        token_name: name,
-        metadata_uri: uri,
-      }),
-    );
-
-    document.querySelector<HTMLInputElement>('#market-name')!.value = name;
-    document.querySelector<HTMLInputElement>('#market-symbol')!.value = symbol;
-    document.querySelector<HTMLSelectElement>('#market-decimals')!.value = String(decimals);
-    document.querySelector<HTMLInputElement>('#manage-symbol')!.value = symbol;
-    document.querySelector<HTMLSelectElement>('#manage-decimals')!.value = String(decimals);
-
-    document.querySelector<HTMLButtonElement>('[data-tab="launchpad"]')!.click();
-  } catch (err: unknown) {
-    showStatus(target, errorMessage(err), 'error');
-  }
+document.querySelector<HTMLInputElement>('#coin-logo')!.addEventListener('input', (event) => {
+  const uri = (event.currentTarget as HTMLInputElement).value.trim();
+  const logo = imageUrl(uri);
+  const preview = document.querySelector<HTMLElement>('#logo-preview')!;
+  preview.innerHTML = logo ? `<img src="${logo}" alt="" />` : '+';
 });
 
-document.querySelector<HTMLFormElement>('#market-form')!.addEventListener('submit', async (event) => {
+document.querySelector<HTMLFormElement>('#coin-form')!.addEventListener('submit', async (event) => {
   event.preventDefault();
 
-  const target = statusElement('#market-status');
+  const target = status('#launch-status');
+
+  if (!account) {
+    showStatus(target, 'Connect your Ultra Wallet first.', 'error');
+    return;
+  }
+
+  const creator = account;
+  const name = document.querySelector<HTMLInputElement>('#coin-name')!.value.trim();
+  const symbol = document.querySelector<HTMLInputElement>('#coin-symbol')!.value.trim().toUpperCase();
+  const logo = document.querySelector<HTMLInputElement>('#coin-logo')!.value.trim();
+  const description = document.querySelector<HTMLTextAreaElement>('#coin-description')!.value.trim();
+  const website = document.querySelector<HTMLInputElement>('#coin-website')!.value.trim();
+  const xUrl = document.querySelector<HTMLInputElement>('#coin-x')!.value.trim();
+  const telegram = document.querySelector<HTMLInputElement>('#coin-telegram')!.value.trim();
+  const initialBuyRaw = document.querySelector<HTMLInputElement>('#initial-buy')!.value.trim() || '0';
+
+  if (!name || utf8Length(name) > 64) {
+    showStatus(target, 'Name must be between 1 and 64 UTF-8 bytes.', 'error');
+    return;
+  }
+
+  if (!/^[A-Z]{1,7}$/.test(symbol)) {
+    showStatus(target, 'Ticker must be 1–7 uppercase A–Z characters.', 'error');
+    return;
+  }
+
+  launchButton.disabled = true;
 
   try {
-    const creator = requiredAccount();
-    const symbol = document.querySelector<HTMLInputElement>('#market-symbol')!.value.trim().toUpperCase();
-    const decimals = Number(document.querySelector<HTMLSelectElement>('#market-decimals')!.value);
-    const displayName = document.querySelector<HTMLInputElement>('#market-name')!.value.trim();
+    launchButton.textContent = '1/4 · Create token…';
+    showStatus(target, 'Step 1/4 — approve token creation in Ultra Wallet.');
 
-    if (!/^[A-Z]{1,7}$/.test(symbol)) throw new Error('Enter a valid token symbol.');
-    if (utf8Length(displayName) === 0 || utf8Length(displayName) > 64) {
-      throw new Error('Display name must be between 1 and 64 UTF-8 bytes.');
-    }
+    const supply = formatAmount(TOTAL_SUPPLY, TOKEN_DECIMALS, symbol);
 
-    const allocationRaw = document.querySelector<HTMLInputElement>('#market-allocation')!.value;
-    const allocation = formatAsset(allocationRaw, decimals, symbol);
-    const startPrice = formatAsset(
-      document.querySelector<HTMLInputElement>('#market-start-price')!.value,
-      PAYMENT_DECIMALS,
-      PAYMENT_SYMBOL,
-    );
-    const endPrice = formatAsset(
-      document.querySelector<HTMLInputElement>('#market-end-price')!.value,
-      PAYMENT_DECIMALS,
-      PAYMENT_SYMBOL,
-    );
-    const graduation = formatAsset(
-      document.querySelector<HTMLInputElement>('#market-graduation')!.value,
-      PAYMENT_DECIMALS,
-      PAYMENT_SYMBOL,
-    );
-
-    if (allocation.atomic <= 0n) throw new Error('Curve token allocation must be greater than zero.');
-    if (startPrice.atomic <= 0n) throw new Error('Start price must be greater than zero.');
-    if (endPrice.atomic <= startPrice.atomic) throw new Error('End price must be greater than start price.');
-    if (graduation.atomic <= 0n) throw new Error('Graduation target must be greater than zero.');
-
-    const image = document.querySelector<HTMLInputElement>('#market-image')!.value.trim();
-    const description = document.querySelector<HTMLTextAreaElement>('#market-description')!.value.trim();
-    const website = document.querySelector<HTMLInputElement>('#market-website')!.value.trim();
-    const xUrl = document.querySelector<HTMLInputElement>('#market-x')!.value.trim();
-    const telegram = document.querySelector<HTMLInputElement>('#market-telegram')!.value.trim();
-
-    await withButton(marketButton, target, 'Confirm market…', async () => {
-      const hash = await signTransaction(PAD_CONTRACT, 'createmarket', {
-        creator,
-        token_symbol: `${decimals},${symbol}`,
-        token_allocation: allocation.asset,
-        start_price: startPrice.asset,
-        end_price: endPrice.asset,
-        graduation_target: graduation.asset,
-        display_name: displayName,
-        image_uri: image,
-        description,
-        website,
-        x_url: xUrl,
-        telegram_url: telegram,
-      });
-
-      document.querySelector<HTMLInputElement>('#manage-symbol')!.value = symbol;
-      document.querySelector<HTMLSelectElement>('#manage-decimals')!.value = String(decimals);
-      document.querySelector<HTMLInputElement>('#manage-allocation')!.value = allocationRaw;
-
-      try {
-        const latest = await latestMarketForCreator(creator);
-        if (latest) {
-          document.querySelector<HTMLInputElement>('#manage-market-id')!.value = String(latest.id);
-          document.querySelector<HTMLInputElement>('#trade-market-id')!.value = String(latest.id);
-        }
-      } catch {
-        // RPC indexing can lag the transaction; creator can enter the market ID manually.
-      }
-
-      return hash;
+    await sign(TOKEN_FACTORY, 'launch', {
+      issuer: creator,
+      maximum_supply: supply,
+      initial_supply: supply,
+      token_name: name,
+      metadata_uri: logo,
     });
 
-    void refreshMarkets();
-  } catch (err: unknown) {
-    showStatus(target, errorMessage(err), 'error');
-  }
-});
+    launchButton.textContent = '2/4 · Create market…';
+    showStatus(target, 'Step 2/4 — approve the Hashed40 bonding-curve market.');
 
-document.querySelector<HTMLButtonElement>('#seed-market')!.addEventListener('click', async (event) => {
-  const button = event.currentTarget as HTMLButtonElement;
-  const target = statusElement('#manage-status');
+    await sign(PAD_CONTRACT, 'createmarket', {
+      creator,
+      token_symbol: `${TOKEN_DECIMALS},${symbol}`,
+      token_allocation: formatAmount(CURVE_ALLOCATION, TOKEN_DECIMALS, symbol),
+      start_price: formatAmount(START_PRICE, PAYMENT_DECIMALS, PAYMENT_SYMBOL),
+      end_price: formatAmount(END_PRICE, PAYMENT_DECIMALS, PAYMENT_SYMBOL),
+      graduation_target: formatAmount(GRADUATION_TARGET, PAYMENT_DECIMALS, PAYMENT_SYMBOL),
+      display_name: name,
+      image_uri: logo,
+      description,
+      website,
+      x_url: xUrl,
+      telegram_url: telegram,
+    });
 
-  try {
-    const creator = requiredAccount();
-    const id = positiveId('#manage-market-id');
-    const symbol = document.querySelector<HTMLInputElement>('#manage-symbol')!.value.trim().toUpperCase();
-    const decimals = Number(document.querySelector<HTMLSelectElement>('#manage-decimals')!.value);
-    const allocation = formatAsset(
-      document.querySelector<HTMLInputElement>('#manage-allocation')!.value,
-      decimals,
-      symbol,
-    );
+    showStatus(target, 'Waiting for the new market to appear on Ultra…');
+    const market = await waitForMarket(creator, symbol);
+    const marketId = Number(market.id);
 
-    await withButton(button, target, 'Confirm deposit…', () =>
-      signTransaction(TOKEN_CONTRACT, 'transfer', {
+    launchButton.textContent = '3/4 · Seed curve…';
+    showStatus(target, 'Step 3/4 — deposit the fixed meme supply into the bonding curve.');
+
+    await sign(TOKEN_FACTORY, 'transfer', {
+      from: creator,
+      to: PAD_CONTRACT,
+      quantity: formatAmount(CURVE_ALLOCATION, TOKEN_DECIMALS, symbol),
+      memo: `seed:${marketId}`,
+    });
+
+    launchButton.textContent = '4/4 · Go live…';
+    showStatus(target, 'Step 4/4 — activate trading.');
+
+    await sign(PAD_CONTRACT, 'activate', { market_id: marketId });
+
+    const initialBuy = Number(initialBuyRaw);
+    if (Number.isFinite(initialBuy) && initialBuy > 0) {
+      launchButton.textContent = 'Initial buy…';
+      showStatus(target, 'Coin is live. Approve your optional initial buy.');
+
+      await sign(PAYMENT_CONTRACT, 'transfer', {
         from: creator,
         to: PAD_CONTRACT,
-        quantity: allocation.asset,
-        memo: `seed:${id}`,
-      }),
-    );
+        quantity: formatAmount(initialBuyRaw, PAYMENT_DECIMALS, PAYMENT_SYMBOL),
+        memo: `buy:${marketId}`,
+      });
+    }
+
+    showStatus(target, `$${symbol} is live on Hashed40.`, 'ok');
+    activeFilter = 'new';
+    document.querySelectorAll('.filter').forEach((button) => button.classList.remove('active'));
+    document.querySelector<HTMLButtonElement>('[data-filter="new"]')!.classList.add('active');
+
+    await refreshMarkets();
+
+    const markets = await fetchMarkets();
+    const live = markets.find((m) => Number(m.id) === marketId);
+    if (live) selectMarket(live);
   } catch (err: unknown) {
     showStatus(target, errorMessage(err), 'error');
+  } finally {
+    launchButton.disabled = false;
+    launchButton.textContent = 'Launch coin';
   }
 });
 
-document.querySelector<HTMLButtonElement>('#activate-market')!.addEventListener('click', async (event) => {
-  const button = event.currentTarget as HTMLButtonElement;
-  const target = statusElement('#manage-status');
+buyButton.addEventListener('click', async () => {
+  const target = status('#trade-status');
+
+  if (!account || !selectedMarket) {
+    showStatus(target, 'Connect your wallet and select a live coin.', 'error');
+    return;
+  }
 
   try {
-    const id = positiveId('#manage-market-id');
+    buyButton.disabled = true;
+    const amount = document.querySelector<HTMLInputElement>('#buy-amount')!.value;
 
-    await withButton(button, target, 'Going live…', () =>
-      signTransaction(PAD_CONTRACT, 'activate', { market_id: id }),
-    );
+    await sign(PAYMENT_CONTRACT, 'transfer', {
+      from: account,
+      to: PAD_CONTRACT,
+      quantity: formatAmount(amount, PAYMENT_DECIMALS, PAYMENT_SYMBOL),
+      memo: `buy:${selectedMarket.id}`,
+    });
 
-    void refreshMarkets();
+    showStatus(target, 'Buy submitted.', 'ok');
+    await refreshMarkets();
   } catch (err: unknown) {
     showStatus(target, errorMessage(err), 'error');
+  } finally {
+    setConnected(Boolean(account));
   }
 });
 
-document.querySelector<HTMLButtonElement>('#settle-market')!.addEventListener('click', async (event) => {
-  const button = event.currentTarget as HTMLButtonElement;
-  const target = statusElement('#manage-status');
+sellButton.addEventListener('click', async () => {
+  const target = status('#trade-status');
+
+  if (!account || !selectedMarket) {
+    showStatus(target, 'Connect your wallet and select a live coin.', 'error');
+    return;
+  }
 
   try {
-    const id = positiveId('#manage-market-id');
+    sellButton.disabled = true;
 
-    await withButton(button, target, 'Settling…', () =>
-      signTransaction(PAD_CONTRACT, 'settle', { market_id: id }),
-    );
+    const ticker = symbolCode(selectedMarket.token_symbol);
+    const decimals = symbolPrecision(selectedMarket.token_symbol);
+    const amount = document.querySelector<HTMLInputElement>('#sell-amount')!.value;
 
-    void refreshMarkets();
+    await sign(TOKEN_FACTORY, 'transfer', {
+      from: account,
+      to: PAD_CONTRACT,
+      quantity: formatAmount(amount, decimals, ticker),
+      memo: `sell:${selectedMarket.id}`,
+    });
+
+    showStatus(target, 'Sell submitted.', 'ok');
+    await refreshMarkets();
   } catch (err: unknown) {
     showStatus(target, errorMessage(err), 'error');
+  } finally {
+    setConnected(Boolean(account));
   }
 });
 
-document.querySelector<HTMLButtonElement>('#buy-market')!.addEventListener('click', async (event) => {
-  const button = event.currentTarget as HTMLButtonElement;
-  const target = statusElement('#trade-status');
-
-  try {
-    const buyer = requiredAccount();
-    const id = positiveId('#trade-market-id');
-    const payment = formatAsset(
-      document.querySelector<HTMLInputElement>('#buy-amount')!.value,
-      PAYMENT_DECIMALS,
-      PAYMENT_SYMBOL,
-    );
-
-    if (payment.atomic <= 0n) throw new Error('Buy amount must be greater than zero.');
-
-    await withButton(button, target, 'Confirm buy…', () =>
-      signTransaction(PAYMENT_CONTRACT, 'transfer', {
-        from: buyer,
-        to: PAD_CONTRACT,
-        quantity: payment.asset,
-        memo: `buy:${id}`,
-      }),
-    );
-
-    void refreshMarkets();
-  } catch (err: unknown) {
-    showStatus(target, errorMessage(err), 'error');
-  }
+document.querySelector<HTMLButtonElement>('#buy-tab')!.addEventListener('click', () => {
+  document.querySelector('#buy-tab')!.classList.add('active');
+  document.querySelector('#sell-tab')!.classList.remove('active');
+  document.querySelector('#buy-panel')!.classList.remove('hidden');
+  document.querySelector('#sell-panel')!.classList.add('hidden');
 });
 
-document.querySelector<HTMLButtonElement>('#sell-market')!.addEventListener('click', async (event) => {
-  const button = event.currentTarget as HTMLButtonElement;
-  const target = statusElement('#trade-status');
-
-  try {
-    const seller = requiredAccount();
-    const id = positiveId('#trade-market-id');
-    const symbol = document.querySelector<HTMLInputElement>('#trade-symbol')!.value.trim().toUpperCase();
-    const decimals = Number(document.querySelector<HTMLSelectElement>('#trade-decimals')!.value);
-    const quantity = formatAsset(
-      document.querySelector<HTMLInputElement>('#sell-amount')!.value,
-      decimals,
-      symbol,
-    );
-
-    if (quantity.atomic <= 0n) throw new Error('Sell amount must be greater than zero.');
-
-    await withButton(button, target, 'Confirm sell…', () =>
-      signTransaction(TOKEN_CONTRACT, 'transfer', {
-        from: seller,
-        to: PAD_CONTRACT,
-        quantity: quantity.asset,
-        memo: `sell:${id}`,
-      }),
-    );
-
-    void refreshMarkets();
-  } catch (err: unknown) {
-    showStatus(target, errorMessage(err), 'error');
-  }
+document.querySelector<HTMLButtonElement>('#sell-tab')!.addEventListener('click', () => {
+  document.querySelector('#sell-tab')!.classList.add('active');
+  document.querySelector('#buy-tab')!.classList.remove('active');
+  document.querySelector('#sell-panel')!.classList.remove('hidden');
+  document.querySelector('#buy-panel')!.classList.add('hidden');
 });
 
-document.querySelector<HTMLButtonElement>('#refresh-markets')!.addEventListener('click', () => {
-  void refreshMarkets();
+document.querySelectorAll<HTMLButtonElement>('.filter').forEach((button) => {
+  button.addEventListener('click', async () => {
+    document.querySelectorAll('.filter').forEach((item) => item.classList.remove('active'));
+    button.classList.add('active');
+    activeFilter = button.dataset.filter as typeof activeFilter;
+
+    try {
+      renderMarkets(await fetchMarkets());
+    } catch (err: unknown) {
+      showStatus(status('#market-status'), errorMessage(err), 'error');
+    }
+  });
 });
 
-setWalletControls(false);
+document.querySelector<HTMLButtonElement>('#refresh')!.addEventListener('click', () => void refreshMarkets());
+
+for (const button of document.querySelectorAll<HTMLButtonElement>('[data-scroll]')) {
+  button.addEventListener('click', () => {
+    document.getElementById(button.dataset.scroll!)?.scrollIntoView({ behavior: 'smooth' });
+  });
+}
+
+document.querySelector<HTMLButtonElement>('#hero-create')!.addEventListener('click', () => {
+  document.querySelector('#create')!.scrollIntoView({ behavior: 'smooth' });
+});
+
+setConnected(false);
 void refreshMarkets();
