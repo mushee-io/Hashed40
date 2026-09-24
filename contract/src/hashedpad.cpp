@@ -94,21 +94,6 @@ asset hashedpad::curve_cost(const market& m, int64_t from_sold, int64_t to_sold)
     return asset{static_cast<int64_t>(total), m.payment_symbol};
 }
 
-asset hashedpad::current_price(const market& m) {
-    const __int128 delta =
-        static_cast<__int128>(m.end_price.amount - m.start_price.amount) *
-        static_cast<__int128>(m.sold.amount) /
-        static_cast<__int128>(m.token_allocation.amount);
-
-    const __int128 price =
-        static_cast<__int128>(m.start_price.amount) + delta;
-
-    check(price >= 0, "curve price cannot be negative");
-    check(price <= std::numeric_limits<int64_t>::max(), "curve price overflow");
-
-    return asset{static_cast<int64_t>(price), m.payment_symbol};
-}
-
 int64_t hashedpad::tokens_for_budget(const market& m, int64_t budget_amount) {
     check(budget_amount > 0, "buy budget must be positive");
 
@@ -423,41 +408,6 @@ void hashedpad::handle_sell(name token_contract,
         asset{payout, market_it->payment_symbol},
         string("Hashed meme launch sell #") + std::to_string(market_id)
     );
-}
-
-void hashedpad::settle(uint64_t market_id) {
-    markets table(get_self(), get_self().value);
-    auto market_it = table.find(market_id);
-    check(market_it != table.end(), "market does not exist");
-
-    require_auth(market_it->creator);
-    check(market_it->status == STATUS_GRADUATED, "market has not graduated");
-
-    const asset reserve = market_it->reserve;
-    const asset unsold = market_it->token_allocation - market_it->sold;
-
-    table.modify(market_it, same_payer, [&](auto& row) {
-        row.reserve.amount = 0;
-        row.status = STATUS_CLOSED;
-    });
-
-    if (reserve.amount > 0) {
-        send_token(
-            market_it->payment_contract,
-            market_it->creator,
-            reserve,
-            string("Hashed graduated market proceeds #") + std::to_string(market_id)
-        );
-    }
-
-    if (unsold.amount > 0) {
-        send_token(
-            market_it->token_contract,
-            market_it->creator,
-            unsold,
-            string("Hashed graduated market unsold tokens #") + std::to_string(market_id)
-        );
-    }
 }
 
 void hashedpad::ontransfer(name from, name to, asset quantity, string memo) {
