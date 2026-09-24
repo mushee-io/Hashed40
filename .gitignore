@@ -1,0 +1,7 @@
+web/node_modules/
+web/dist/
+web/.env
+contract/build/
+*.wasm
+*.abi
+.DS_Store
