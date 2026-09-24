@@ -14,14 +14,20 @@ module.exports = class test {
             return result;
         };
 
-        const balanceOf = async (account, symbol) => {
+        const balanceString = async (account, symbol) => {
             const rows = await common.getTable('hashedlaunch', account, 'accounts');
             const row = rows.rows.find((entry) => entry.balance.endsWith(` ${symbol}`));
             return row ? row.balance : null;
         };
 
+        const balanceAmount = async (account, symbol) => {
+            const balance = await balanceString(account, symbol);
+            if (!balance) return 0;
+            return Number(balance.split(' ')[0]);
+        };
+
         return {
-            'bootstraps Hashed launcher and launchpad contracts': async () => {
+            'bootstraps Hashed launcher and meme launchpad': async () => {
                 const accounts = [
                     'hashedlaunch',
                     'hashedpad',
@@ -48,21 +54,22 @@ module.exports = class test {
 
                 const buildDir = path.resolve(__dirname, '../contract/build');
 
-                const launcherDeployed = await cleos(
-                    `set contract hashedlaunch "${buildDir}" hashedlaunch.wasm hashedlaunch.abi -p hashedlaunch@active`,
-                    { swallow: false, fetch: false },
+                assert(
+                    await cleos(
+                        `set contract hashedlaunch "${buildDir}" hashedlaunch.wasm hashedlaunch.abi -p hashedlaunch@active`,
+                        { swallow: false, fetch: false },
+                    ),
+                    'hashedlaunch deployment failed',
                 );
-                assert(launcherDeployed, 'hashedlaunch contract deployment failed');
 
-                const padDeployed = await cleos(
-                    `set contract hashedpad "${buildDir}" hashedpad.wasm hashedpad.abi -p hashedpad@active`,
-                    { swallow: false, fetch: false },
+                assert(
+                    await cleos(
+                        `set contract hashedpad "${buildDir}" hashedpad.wasm hashedpad.abi -p hashedpad@active`,
+                        { swallow: false, fetch: false },
+                    ),
+                    'hashedpad deployment failed',
                 );
-                assert(padDeployed, 'hashedpad contract deployment failed');
 
-                // Claims/refunds/proceeds are inline token transfers from hashedpad.
-                // Give the contract's code permission authority to satisfy require_auth(from)
-                // in standard Antelope-style token contracts.
                 const activeAuthority = JSON.stringify({
                     threshold: 1,
                     keys: [{ key: padPublicKey, weight: 1 }],
@@ -75,33 +82,51 @@ module.exports = class test {
                     waits: [],
                 });
 
-                const permissionUpdated = await cleos(
-                    `set account permission hashedpad active '${activeAuthority}' owner -p hashedpad@owner`,
-                    { swallow: false, fetch: false },
+                assert(
+                    await cleos(
+                        `set account permission hashedpad active '${activeAuthority}' owner -p hashedpad@owner`,
+                        { swallow: false, fetch: false },
+                    ),
+                    'could not add hashedpad@eosio.code permission',
                 );
-                assert(permissionUpdated, 'could not add hashedpad@eosio.code permission');
 
                 await push(
                     'hashedpad',
                     'setconfig',
                     'hashedpad@active',
-                    ['hashedlaunch', 'hashedlaunch', '8,TUOS', 'platformfee', 250],
-                    'launchpad fee config failed',
+                    [
+                        'hashedlaunch',
+                        'hashedlaunch',
+                        '8,TUOS',
+                        'platformfee',
+                        100,
+                        50,
+                        '1000.00000000 TUOS',
+                        '200.00000000 TUOS',
+                    ],
+                    'meme launchpad configuration failed',
                 );
             },
 
-            'creates sale and payment test tokens': async () => {
+            'creates a fixed-supply meme token and local payment token': async () => {
                 await push(
                     'hashedlaunch',
                     'launch',
                     'hashcreator@active',
                     [
                         'hashcreator',
-                        '1000000.00000000 HASH',
-                        '500000.00000000 HASH',
-                        'Hashed Sale Token',
-                        'https://example.com/hash.json',
+                        '1000000.00000000 MEME',
+                        '1000000.00000000 MEME',
+                        'Ultra Meme',
+                        'ipfs://ultra-meme-token',
                     ],
+                );
+
+                await push(
+                    'hashedlaunch',
+                    'lockmint',
+                    'hashcreator@active',
+                    ['hashcreator', 'MEME'],
                 );
 
                 await push(
@@ -113,7 +138,7 @@ module.exports = class test {
                         '1000000.00000000 TUOS',
                         '100000.00000000 TUOS',
                         'Test UOS',
-                        'https://example.com/tuos.json',
+                        'ipfs://test-uos',
                     ],
                 );
 
@@ -121,202 +146,189 @@ module.exports = class test {
                     'hashedlaunch',
                     'transfer',
                     'hashcreator@active',
-                    ['hashcreator', 'buyerone', '3000.00000000 TUOS', 'test launchpad funds'],
+                    ['hashcreator', 'buyerone', '1000.00000000 TUOS', 'meme test funds'],
                 );
 
                 await push(
                     'hashedlaunch',
                     'transfer',
                     'hashcreator@active',
-                    ['hashcreator', 'buyertwo', '2000.00000000 TUOS', 'test launchpad funds'],
+                    ['hashcreator', 'buyertwo', '1000.00000000 TUOS', 'meme test funds'],
                 );
 
+                const stats = await common.getTable('hashedlaunch', 'MEME', 'stat');
+                assert(stats.rows[0].mint_locked === true, 'MEME supply is not mint locked');
                 assert(
-                    (await balanceOf('buyerone', 'TUOS')) === '3000.00000000 TUOS',
-                    'buyer one payment balance mismatch',
-                );
-                assert(
-                    (await balanceOf('buyertwo', 'TUOS')) === '2000.00000000 TUOS',
-                    'buyer two payment balance mismatch',
+                    stats.rows[0].supply === '1000000.00000000 MEME',
+                    'MEME full supply was not issued',
                 );
             },
 
-            'creates, funds, and activates launch campaign 1': async () => {
+            'creates a meme launch from the locked Hashed token': async () => {
                 await push(
                     'hashedpad',
-                    'createcamp',
+                    'creatememe',
                     'hashcreator@active',
                     [
                         'hashcreator',
-                        'hashedlaunch',
-                        '100000.00000000 HASH',
-                        'hashedlaunch',
-                        '8,TUOS',
-                        '10.00000000 HASH',
-                        0,
-                        4102444800,
-                        '1000.00000000 TUOS',
-                        '2500.00000000 TUOS',
-                        '10.00000000 TUOS',
-                        '1500.00000000 TUOS',
-                        false,
+                        '8,MEME',
+                        'Ultra Meme',
+                        'https://example.com/meme.png',
+                        'A meme token launched natively on Ultra.',
+                        'https://example.com',
+                        'https://x.com/example',
+                        'https://t.me/example',
                     ],
                 );
 
-                const campaigns = await common.getTable('hashedpad', 'hashedpad', 'campaigns');
-                assert(campaigns.rows.length === 1, 'campaign 1 was not created');
-                assert(campaigns.rows[0].id === 1, 'unexpected campaign id');
-                assert(campaigns.rows[0].status === 0, 'campaign should begin in draft status');
-                assert(campaigns.rows[0].fee_bps === 250, 'campaign did not snapshot platform fee');
+                const launches = await common.getTable('hashedpad', 'hashedpad', 'launches');
+                assert(launches.rows.length === 1, 'meme launch was not created');
 
+                const launch = launches.rows[0];
+                assert(launch.id === 1, 'unexpected meme launch id');
+                assert(launch.status === 0, 'new meme launch should be a draft');
+                assert(
+                    launch.token_allocation === '1000000.00000000 MEME',
+                    'launch did not capture the fixed token supply',
+                );
+                assert(launch.token_name === 'Ultra Meme', 'meme metadata was not stored');
+            },
+
+            'escrows the entire token supply and automatically goes live': async () => {
                 await push(
                     'hashedlaunch',
                     'transfer',
                     'hashcreator@active',
-                    ['hashcreator', 'hashedpad', '100000.00000000 HASH', 'deposit:1'],
-                    'campaign token escrow deposit failed',
+                    ['hashcreator', 'hashedpad', '1000000.00000000 MEME', 'deposit:1'],
                 );
 
-                await push('hashedpad', 'activate', 'hashcreator@active', [1]);
+                const launches = await common.getTable('hashedpad', 'hashedpad', 'launches');
+                const launch = launches.rows[0];
 
-                const updated = await common.getTable('hashedpad', 'hashedpad', 'campaigns');
-                assert(updated.rows[0].status === 1, 'campaign 1 did not activate');
+                assert(launch.status === 1, 'meme launch did not go live after escrow');
                 assert(
-                    updated.rows[0].deposited === '100000.00000000 HASH',
-                    'campaign token escrow balance mismatch',
+                    launch.token_reserve === '1000000.00000000 MEME',
+                    'bonding curve token reserve mismatch',
+                );
+                assert(
+                    (await balanceString('hashcreator', 'MEME')) === null,
+                    'creator should not retain meme supply after escrow',
                 );
             },
 
-            'accepts contributions and calculates token allocations': async () => {
+            'buys MEME with the bonding curve and pays protocol and creator fees': async () => {
                 await push(
                     'hashedlaunch',
                     'transfer',
                     'buyerone@active',
-                    ['buyerone', 'hashedpad', '1500.00000000 TUOS', 'buy:1'],
-                    'buyer one contribution failed',
+                    ['buyerone', 'hashedpad', '100.00000000 TUOS', 'buy:1'],
                 );
 
+                const launches = await common.getTable('hashedpad', 'hashedpad', 'launches');
+                const launch = launches.rows[0];
+
+                assert(
+                    launch.payment_reserve === '98.50000000 TUOS',
+                    'net bonding curve reserve should exclude 1.5% fees',
+                );
+                assert(
+                    Number(launch.token_reserve.split(' ')[0]) < 1000000,
+                    'bonding curve did not release MEME',
+                );
+
+                const buyerTokens = await balanceAmount('buyerone', 'MEME');
+                assert(buyerTokens > 0, 'buyer one did not receive MEME');
+
+                assert(
+                    (await balanceString('platformfee', 'TUOS')) === '1.00000000 TUOS',
+                    'protocol fee was not paid',
+                );
+
+                const creatorPayment = await balanceAmount('hashcreator', 'TUOS');
+                assert(creatorPayment > 98000, 'creator trading fee was not paid');
+            },
+
+            'second buy crosses the graduation target while curve trading remains available': async () => {
                 await push(
                     'hashedlaunch',
                     'transfer',
                     'buyertwo@active',
-                    ['buyertwo', 'hashedpad', '1000.00000000 TUOS', 'buy:1'],
-                    'buyer two contribution failed',
+                    ['buyertwo', 'hashedpad', '150.00000000 TUOS', 'buy:1'],
                 );
 
-                const campaigns = await common.getTable('hashedpad', 'hashedpad', 'campaigns');
-                const campaign = campaigns.rows.find((row) => row.id === 1);
+                const launches = await common.getTable('hashedpad', 'hashedpad', 'launches');
+                const launch = launches.rows[0];
 
-                assert(campaign.raised === '2500.00000000 TUOS', 'raised amount mismatch');
-                assert(campaign.sold === '25000.00000000 HASH', 'sold token amount mismatch');
-
-                const buyerOne = await common.getTable('hashedpad', '1', 'contribs');
-                const contribution = buyerOne.rows.find((row) => row.account === 'buyerone');
-                assert(contribution.paid === '1500.00000000 TUOS', 'buyer one paid amount mismatch');
-                assert(contribution.claimable === '15000.00000000 HASH', 'buyer one allocation mismatch');
+                assert(launch.graduated === true, 'meme launch did not reach graduation');
+                assert(
+                    Number(launch.payment_reserve.split(' ')[0]) >= 200,
+                    'graduation reserve target was not reached',
+                );
+                assert(launch.trade_count === 2, 'unexpected trade count after two buys');
             },
 
-            'finalizes a successful launch and lets buyers claim': async () => {
-                await push('hashedpad', 'finalize', 'buyerone@active', [1]);
-
-                let campaigns = await common.getTable('hashedpad', 'hashedpad', 'campaigns');
-                let campaign = campaigns.rows.find((row) => row.id === 1);
-                assert(campaign.status === 2, 'campaign 1 should be successful');
-
-                await push('hashedpad', 'claim', 'buyerone@active', [1, 'buyerone']);
-                await push('hashedpad', 'claim', 'buyertwo@active', [1, 'buyertwo']);
-
-                assert(
-                    (await balanceOf('buyerone', 'HASH')) === '15000.00000000 HASH',
-                    'buyer one claim balance mismatch',
-                );
-                assert(
-                    (await balanceOf('buyertwo', 'HASH')) === '10000.00000000 HASH',
-                    'buyer two claim balance mismatch',
-                );
-            },
-
-            'splits successful proceeds and returns unsold sale tokens': async () => {
-                await push('hashedpad', 'withdraw', 'hashcreator@active', [1]);
-
-                assert(
-                    (await balanceOf('platformfee', 'TUOS')) === '62.50000000 TUOS',
-                    '2.5% launchpad fee was not paid correctly',
-                );
-
-                assert(
-                    (await balanceOf('hashcreator', 'TUOS')) === '97437.50000000 TUOS',
-                    'creator proceeds balance mismatch',
-                );
-
-                await push('hashedpad', 'reclaim', 'hashcreator@active', [1]);
-
-                assert(
-                    (await balanceOf('hashcreator', 'HASH')) === '475000.00000000 HASH',
-                    'creator did not recover unsold HASH',
-                );
-            },
-
-            'refunds contributors when a campaign misses its soft cap': async () => {
-                const endAt = Math.floor(Date.now() / 1000) + 3;
-
-                await push(
-                    'hashedpad',
-                    'createcamp',
-                    'hashcreator@active',
-                    [
-                        'hashcreator',
-                        'hashedlaunch',
-                        '10000.00000000 HASH',
-                        'hashedlaunch',
-                        '8,TUOS',
-                        '10.00000000 HASH',
-                        0,
-                        endAt,
-                        '1000.00000000 TUOS',
-                        '1000.00000000 TUOS',
-                        '10.00000000 TUOS',
-                        '1000.00000000 TUOS',
-                        false,
-                    ],
-                );
-
-                await push(
-                    'hashedlaunch',
-                    'transfer',
-                    'hashcreator@active',
-                    ['hashcreator', 'hashedpad', '10000.00000000 HASH', 'deposit:2'],
-                );
-
-                await push('hashedpad', 'activate', 'hashcreator@active', [2]);
+            'sells MEME back into the bonding curve for TUOS': async () => {
+                const before = await balanceAmount('buyerone', 'TUOS');
 
                 await push(
                     'hashedlaunch',
                     'transfer',
                     'buyerone@active',
-                    ['buyerone', 'hashedpad', '100.00000000 TUOS', 'buy:2'],
+                    ['buyerone', 'hashedpad', '10000.00000000 MEME', 'sell:1'],
                 );
 
-                await new Promise((resolve) => setTimeout(resolve, 4500));
+                const after = await balanceAmount('buyerone', 'TUOS');
+                assert(after > before, 'seller did not receive TUOS from the bonding curve');
 
-                await push('hashedpad', 'finalize', 'buyerone@active', [2]);
+                const launches = await common.getTable('hashedpad', 'hashedpad', 'launches');
+                const launch = launches.rows[0];
 
-                const campaigns = await common.getTable('hashedpad', 'hashedpad', 'campaigns');
-                const campaign = campaigns.rows.find((row) => row.id === 2);
-                assert(campaign.status === 3, 'campaign 2 should fail below soft cap');
+                assert(launch.trade_count === 3, 'sell trade was not counted');
+                assert(launch.graduated === true, 'graduation flag should be permanent');
 
-                await push('hashedpad', 'refund', 'buyerone@active', [2, 'buyerone']);
+                const trades = await common.getTable('hashedpad', '1', 'trades');
+                assert(trades.rows.length === 3, 'recent trade history was not recorded');
+                assert(trades.rows[2].is_buy === false, 'third trade should be a sell');
+            },
 
-                assert(
-                    (await balanceOf('buyerone', 'TUOS')) === '1500.00000000 TUOS',
-                    'buyer one did not receive the failed-launch refund',
+            'blocks new minting after the meme token has launched': async () => {
+                await common.transactAssert(
+                    [
+                        {
+                            account: 'hashedlaunch',
+                            name: 'issue',
+                            authorization: [{ actor: 'hashcreator', permission: 'active' }],
+                            data: {
+                                to: 'hashcreator',
+                                quantity: '1.00000000 MEME',
+                                memo: 'attempt to inflate fixed supply',
+                            },
+                        },
+                    ],
+                    'minting is permanently locked for this token',
                 );
+            },
 
-                await push('hashedpad', 'reclaim', 'hashcreator@active', [2]);
-
-                assert(
-                    (await balanceOf('hashcreator', 'HASH')) === '475000.00000000 HASH',
-                    'failed campaign escrow was not fully returned',
+            'prevents duplicate meme launches for the same token': async () => {
+                await common.transactAssert(
+                    [
+                        {
+                            account: 'hashedpad',
+                            name: 'creatememe',
+                            authorization: [{ actor: 'hashcreator', permission: 'active' }],
+                            data: {
+                                creator: 'hashcreator',
+                                sale_symbol: '8,MEME',
+                                token_name: 'Ultra Meme Again',
+                                image_uri: 'https://example.com/meme2.png',
+                                description: 'duplicate launch',
+                                website: '',
+                                x_url: '',
+                                telegram_url: '',
+                            },
+                        },
+                    ],
+                    'this token already has a meme launch',
                 );
             },
         };
