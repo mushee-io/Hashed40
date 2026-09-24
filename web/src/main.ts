@@ -6,7 +6,7 @@ const PAD_CONTRACT = import.meta.env.VITE_LAUNCHPAD_ACCOUNT || 'hashedpad';
 const PAYMENT_CONTRACT = import.meta.env.VITE_PAYMENT_CONTRACT || 'eosio.token';
 const PAYMENT_SYMBOL = import.meta.env.VITE_PAYMENT_SYMBOL || 'UOS';
 const PAYMENT_DECIMALS = Number(import.meta.env.VITE_PAYMENT_DECIMALS || 8);
-const RPC_URL = import.meta.env.VITE_ULTRA_RPC_URL || 'https://test.ultra.eosusa.io';
+const RPC_URL = import.meta.env.VITE_ULTRA_RPC_URL || 'https://ultra-testnet.eosphere.io';
 
 const ULTRA_MAINNET_CHAIN_ID = 'a9c481dfbc7d9506dc7e87e9a137c931b0a9303f64fd7a1d08b8230133920097';
 const ULTRA_TESTNET_CHAIN_ID = '7fc56be645bb76ab9d747b53089f132dcb7681db06f0852cfa03eaf6f7ac80e9';
@@ -16,23 +16,53 @@ const MAX_ASSET_AMOUNT = (1n << 62n) - 1n;
 
 let account: string | undefined;
 
+type StatusKind = 'ok' | 'error' | 'info';
+
+type LaunchRow = {
+  id: number | string;
+  creator: string;
+  sale_contract: string;
+  sale_symbol: string;
+  token_allocation: string;
+  token_reserve: string;
+  payment_contract: string;
+  payment_symbol: string;
+  virtual_payment: string;
+  payment_reserve: string;
+  graduation_target: string;
+  fee_receiver: string;
+  protocol_fee_bps: number;
+  creator_fee_bps: number;
+  graduated: boolean;
+  status: number;
+  volume: string;
+  trade_count: number | string;
+  created_at: number | string;
+  token_name: string;
+  image_uri: string;
+  description: string;
+  website: string;
+  x_url: string;
+  telegram_url: string;
+};
+
 const app = document.querySelector<HTMLDivElement>('#app')!;
 
 app.innerHTML = `
   <main class="shell">
     <nav>
       <div class="brand"><span class="mark">H</span> HASHED</div>
-      <div class="tabs" aria-label="Hashed products">
+      <div class="tabs">
         <button class="tab active" data-tab="launcher">Token Launcher</button>
-        <button class="tab" data-tab="launchpad">Launchpad</button>
+        <button class="tab" data-tab="meme">Meme Launchpad</button>
       </div>
       <button id="connect" class="wallet">Connect Ultra Wallet</button>
     </nav>
 
     <section class="hero">
-      <div class="eyebrow">ULTRA TESTNET · TOKEN LAUNCHER + LAUNCHPAD</div>
-      <h1>Create the token.<br/>Run the launch.</h1>
-      <p>Hashed is focused on two things: creating native Ultra tokens and launching them through an escrowed token sale.</p>
+      <div class="eyebrow">ULTRA TESTNET · CREATE · LAUNCH · TRADE</div>
+      <h1>Launch tokens<br/>natively on Ultra.</h1>
+      <p>Create a fixed-supply token, put the full supply on a bonding curve, and let anyone buy or sell it with UOS.</p>
     </section>
 
     <section id="launcher-panel" class="panel active">
@@ -42,155 +72,186 @@ app.innerHTML = `
           <span class="network">ULTRA TESTNET</span>
         </div>
 
-        <form id="launch-form">
+        <form id="token-form">
           <div class="grid2">
-            <label>Token name<input id="name" maxlength="64" placeholder="Hashed Dollar" required /></label>
-            <label>Symbol<input id="symbol" maxlength="7" placeholder="HUSD" pattern="[A-Z]{1,7}" required /></label>
+            <label>Token name<input id="token-name" maxlength="64" placeholder="Ultra Dog" required /></label>
+            <label>Symbol<input id="token-symbol" maxlength="7" placeholder="UDOG" pattern="[A-Z]{1,7}" required /></label>
           </div>
-          <div class="grid2">
-            <label>Maximum supply<input id="max" inputmode="decimal" value="1000000" required /></label>
-            <label>Initial supply<input id="initial" inputmode="decimal" value="1000000" required /></label>
-          </div>
-          <div class="grid2">
-            <label>Decimals<select id="decimals"><option>4</option><option>6</option><option selected>8</option></select></label>
-            <label>Metadata URI <span>(optional)</span><input id="uri" maxlength="256" placeholder="ipfs://... or https://..." /></label>
-          </div>
-          <div class="summary">
-            <div><span>Issuer</span><strong id="issuer">Not connected</strong></div>
-            <div><span>Token contract</span><strong>${TOKEN_CONTRACT}</strong></div>
-            <div><span>Network</span><strong>Ultra Testnet</strong></div>
-          </div>
-          <button id="launch" class="primary" type="submit" disabled>Connect wallet to create token</button>
-        </form>
-        <div id="launcher-status" class="status"></div>
-      </section>
-    </section>
 
-    <section id="launchpad-panel" class="panel">
-      <section class="card">
-        <div class="form-head">
-          <div><span class="step">02</span><h2>Create launch campaign</h2></div>
-          <span class="network">UOS RAISE</span>
-        </div>
-
-        <form id="campaign-form">
           <div class="grid3">
-            <label>Sale token symbol<input id="sale-symbol" maxlength="7" value="HASH" pattern="[A-Z]{1,7}" required /></label>
-            <label>Sale token decimals<select id="sale-decimals"><option>4</option><option>6</option><option selected>8</option></select></label>
-            <label>Token allocation<input id="sale-allocation" inputmode="decimal" value="100000" required /></label>
+            <label>Maximum supply<input id="token-max" inputmode="decimal" value="1000000000" required /></label>
+            <label>Initial supply<input id="token-initial" inputmode="decimal" value="1000000000" required /></label>
+            <label>Decimals<select id="token-decimals"><option>4</option><option>6</option><option selected>8</option></select></label>
           </div>
 
-          <div class="grid2">
-            <label>Tokens per 1 ${PAYMENT_SYMBOL}<input id="sale-rate" inputmode="decimal" value="10" required /></label>
-            <label>Payment asset<input value="${PAYMENT_SYMBOL} · ${PAYMENT_CONTRACT}" disabled /></label>
-          </div>
-
-          <div class="grid2">
-            <label>Start time<input id="start-at" type="datetime-local" required /></label>
-            <label>End time<input id="end-at" type="datetime-local" required /></label>
-          </div>
-
-          <div class="grid2">
-            <label>Soft cap (${PAYMENT_SYMBOL})<input id="soft-cap" inputmode="decimal" value="1000" required /></label>
-            <label>Hard cap (${PAYMENT_SYMBOL})<input id="hard-cap" inputmode="decimal" value="2500" required /></label>
-          </div>
-
-          <div class="grid2">
-            <label>Minimum contribution<input id="min-contribution" inputmode="decimal" value="10" required /></label>
-            <label>Maximum contribution<input id="max-contribution" inputmode="decimal" value="1500" required /></label>
-          </div>
+          <label>Metadata URI <span>(optional)</span><input id="token-uri" maxlength="256" placeholder="ipfs://... or https://..." /></label>
 
           <label class="checkbox-row">
-            <input id="allowlist-enabled" type="checkbox" />
-            <span>Use an allowlist for this launch</span>
+            <input id="meme-ready" type="checkbox" checked />
+            <span><strong>Meme-ready fixed supply</strong> — issue the full supply and permanently lock future minting.</span>
           </label>
 
           <div class="summary">
-            <div><span>Creator</span><strong id="campaign-creator">Not connected</strong></div>
-            <div><span>Launchpad contract</span><strong>${PAD_CONTRACT}</strong></div>
-            <div><span>Payment</span><strong>${PAYMENT_SYMBOL}</strong></div>
+            <div><span>Issuer</span><strong id="issuer">Not connected</strong></div>
+            <div><span>Contract</span><strong>${TOKEN_CONTRACT}</strong></div>
+            <div><span>Network</span><strong>Ultra Testnet</strong></div>
           </div>
 
-          <button id="create-campaign" class="primary" type="submit" disabled>Connect wallet to create campaign</button>
+          <button id="create-token" class="primary" type="submit" disabled>Connect wallet to create token</button>
         </form>
-        <div id="campaign-status" class="status"></div>
-      </section>
 
-      <section class="card operations">
-        <div class="form-head">
-          <div><span class="step">03</span><h2>Campaign operations</h2></div>
-          <span class="network">ESCROW + CLAIMS</span>
-        </div>
-
-        <div class="grid3">
-          <label>Campaign ID<input id="campaign-id" inputmode="numeric" placeholder="1" /></label>
-          <label>Sale token symbol<input id="ops-symbol" maxlength="7" value="HASH" /></label>
-          <label>Sale token decimals<select id="ops-decimals"><option>4</option><option>6</option><option selected>8</option></select></label>
-        </div>
-
-        <div class="grid2">
-          <label>Escrow allocation<input id="ops-allocation" inputmode="decimal" value="100000" /></label>
-          <button id="fund-campaign" class="secondary action-button" type="button" disabled>Deposit sale tokens</button>
-        </div>
-
-        <div class="button-grid">
-          <button id="activate-campaign" class="secondary" type="button" disabled>Activate</button>
-          <button id="finalize-campaign" class="secondary" type="button" disabled>Finalize</button>
-          <button id="withdraw-proceeds" class="secondary" type="button" disabled>Withdraw proceeds</button>
-          <button id="reclaim-tokens" class="secondary" type="button" disabled>Reclaim unsold tokens</button>
-        </div>
-
-        <div class="divider"></div>
-
-        <div class="grid2">
-          <label>Contribute ${PAYMENT_SYMBOL}<input id="buy-amount" inputmode="decimal" value="100" /></label>
-          <button id="buy-campaign" class="primary action-button" type="button" disabled>Contribute to launch</button>
-        </div>
-
-        <div class="button-grid two">
-          <button id="claim-tokens" class="secondary" type="button" disabled>Claim purchased tokens</button>
-          <button id="refund-payment" class="secondary" type="button" disabled>Claim refund</button>
-        </div>
-
-        <div class="divider"></div>
-
-        <div class="grid2">
-          <label>Allowlist account<input id="allowlist-account" placeholder="Ultra account" /></label>
-          <div class="inline-actions">
-            <button id="allow-account" class="secondary" type="button" disabled>Add</button>
-            <button id="remove-account" class="secondary" type="button" disabled>Remove</button>
-          </div>
-        </div>
-
-        <div id="operations-status" class="status"></div>
+        <div id="token-status" class="status"></div>
       </section>
     </section>
 
-    <footer>Hashed · Token Launcher + Launchpad on Ultra</footer>
+    <section id="meme-panel" class="panel">
+      <section class="launch-layout">
+        <section class="card">
+          <div class="form-head">
+            <div><span class="step">02</span><h2>Create meme launch</h2></div>
+            <span class="network">BONDING CURVE</span>
+          </div>
+
+          <form id="meme-form">
+            <div class="grid2">
+              <label>Token name<input id="meme-name" maxlength="64" placeholder="Ultra Dog" required /></label>
+              <label>Token symbol<input id="meme-symbol" maxlength="7" placeholder="UDOG" pattern="[A-Z]{1,7}" required /></label>
+            </div>
+
+            <div class="grid2">
+              <label>Token decimals<select id="meme-decimals"><option>4</option><option>6</option><option selected>8</option></select></label>
+              <label>Image URI<input id="meme-image" maxlength="256" placeholder="https://... or ipfs://..." required /></label>
+            </div>
+
+            <label>Description<textarea id="meme-description" maxlength="512" placeholder="What is this meme about?"></textarea></label>
+
+            <div class="grid3">
+              <label>Website <span>(optional)</span><input id="meme-website" maxlength="256" placeholder="https://..." /></label>
+              <label>X <span>(optional)</span><input id="meme-x" maxlength="256" placeholder="https://x.com/..." /></label>
+              <label>Telegram <span>(optional)</span><input id="meme-telegram" maxlength="256" placeholder="https://t.me/..." /></label>
+            </div>
+
+            <div class="notice">
+              The token must be created through Hashed, have its entire max supply issued, and have minting permanently locked.
+            </div>
+
+            <div class="button-row">
+              <button id="lock-mint" class="secondary" type="button" disabled>Lock minting</button>
+              <button id="create-meme" class="primary" type="submit" disabled>Create meme launch</button>
+            </div>
+          </form>
+
+          <div id="meme-status" class="status"></div>
+        </section>
+
+        <section class="card">
+          <div class="form-head">
+            <div><span class="step">03</span><h2>Go live</h2></div>
+            <span class="network">FULL SUPPLY ESCROW</span>
+          </div>
+
+          <label>Launch ID<input id="launch-id" inputmode="numeric" placeholder="1" /></label>
+          <p class="muted">Going live transfers the token's entire fixed supply into the Hashed bonding curve. The creator cannot mint more afterwards.</p>
+
+          <button id="go-live" class="primary" type="button" disabled>Escrow supply & go live</button>
+          <div id="live-status" class="status"></div>
+
+          <div class="divider"></div>
+
+          <div class="form-head compact">
+            <div><span class="step">04</span><h2>Trade</h2></div>
+            <button id="refresh-launch" class="ghost" type="button">Refresh</button>
+          </div>
+
+          <div id="selected-launch" class="selected-launch empty">Enter a launch ID to load market data.</div>
+
+          <div class="grid2">
+            <label>Buy with ${PAYMENT_SYMBOL}<input id="buy-amount" inputmode="decimal" value="10" /></label>
+            <button id="buy-token" class="primary action-button" type="button" disabled>Buy token</button>
+          </div>
+
+          <div class="grid2">
+            <label>Sell token amount<input id="sell-amount" inputmode="decimal" value="1000" /></label>
+            <button id="sell-token" class="secondary action-button" type="button" disabled>Sell token</button>
+          </div>
+
+          <div id="trade-status" class="status"></div>
+        </section>
+      </section>
+
+      <section class="market-section">
+        <div class="market-head">
+          <div>
+            <div class="eyebrow">LIVE ON HASHED</div>
+            <h2>Meme launches</h2>
+          </div>
+          <button id="refresh-markets" class="secondary" type="button">Refresh markets</button>
+        </div>
+        <div id="market-grid" class="market-grid">
+          <div class="empty-state">No launches loaded yet.</div>
+        </div>
+      </section>
+    </section>
+
+    <footer>Hashed · Token Launcher + Meme Launchpad on Ultra</footer>
   </main>
 `;
 
-type StatusKind = 'ok' | 'error' | 'info';
-
 const connectButton = document.querySelector<HTMLButtonElement>('#connect')!;
-const tokenLaunchButton = document.querySelector<HTMLButtonElement>('#launch')!;
-const campaignCreateButton = document.querySelector<HTMLButtonElement>('#create-campaign')!;
+const createTokenButton = document.querySelector<HTMLButtonElement>('#create-token')!;
+const createMemeButton = document.querySelector<HTMLButtonElement>('#create-meme')!;
+const lockMintButton = document.querySelector<HTMLButtonElement>('#lock-mint')!;
+const goLiveButton = document.querySelector<HTMLButtonElement>('#go-live')!;
+const buyButton = document.querySelector<HTMLButtonElement>('#buy-token')!;
+const sellButton = document.querySelector<HTMLButtonElement>('#sell-token')!;
 const issuer = document.querySelector<HTMLElement>('#issuer')!;
-const campaignCreator = document.querySelector<HTMLElement>('#campaign-creator')!;
+const marketGrid = document.querySelector<HTMLDivElement>('#market-grid')!;
+const selectedLaunch = document.querySelector<HTMLDivElement>('#selected-launch')!;
 
-const walletButtons = Array.from(
-  document.querySelectorAll<HTMLButtonElement>(
-    '#fund-campaign, #activate-campaign, #finalize-campaign, #withdraw-proceeds, #reclaim-tokens, #buy-campaign, #claim-tokens, #refund-payment, #allow-account, #remove-account',
-  ),
-);
-
-function statusElement(id: string): HTMLElement {
-  return document.querySelector<HTMLElement>(id)!;
-}
-
-function showStatus(target: HTMLElement, message: string, kind: StatusKind = 'info') {
+function showStatus(id: string, message: string, kind: StatusKind = 'info') {
+  const target = document.querySelector<HTMLElement>(id)!;
   target.className = `status ${kind}`;
   target.textContent = message;
+}
+
+function setWalletControls(enabled: boolean) {
+  [createTokenButton, createMemeButton, lockMintButton, goLiveButton, buyButton, sellButton].forEach((button) => {
+    button.disabled = !enabled;
+  });
+
+  if (enabled) createTokenButton.textContent = 'Create token';
+}
+
+function walletErrorCode(err: unknown): number | undefined {
+  if (typeof err !== 'object' || err === null) return undefined;
+  const candidate = err as { code?: unknown };
+  return typeof candidate.code === 'number' ? candidate.code : undefined;
+}
+
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+
+  if (typeof err === 'object' && err !== null) {
+    const candidate = err as {
+      message?: string;
+      data?: string | { message?: string; error?: { what?: string } };
+    };
+
+    if (typeof candidate.data === 'string') return candidate.data;
+
+    if (candidate.data && typeof candidate.data === 'object') {
+      return candidate.data.message ?? candidate.data.error?.what ?? candidate.message ?? 'Wallet request failed.';
+    }
+
+    return candidate.message ?? 'Wallet request failed.';
+  }
+
+  return 'Wallet request failed.';
+}
+
+function requiredAccount(): string {
+  if (!account) throw new Error('Connect your Ultra Wallet first.');
+  return account;
 }
 
 function utf8Length(value: string): number {
@@ -225,7 +286,7 @@ function parseAmount(raw: string, decimals: number): { atomic: bigint; normalize
   };
 }
 
-function formatAsset(raw: string, decimals: number, symbol: string): { atomic: bigint; asset: string } {
+function formatAsset(raw: string, decimals: number, symbol: string) {
   const parsed = parseAmount(raw, decimals);
   return {
     atomic: parsed.atomic,
@@ -233,153 +294,258 @@ function formatAsset(raw: string, decimals: number, symbol: string): { atomic: b
   };
 }
 
-function walletErrorCode(err: unknown): number | undefined {
-  if (typeof err !== 'object' || err === null) return undefined;
-  const candidate = err as { code?: unknown };
-  return typeof candidate.code === 'number' ? candidate.code : undefined;
+function assetNumber(asset: string): number {
+  const value = Number(asset.split(' ')[0]);
+  return Number.isFinite(value) ? value : 0;
 }
 
-function errorMessage(err: unknown): string {
-  if (err instanceof Error) return err.message;
-
-  if (typeof err === 'object' && err !== null) {
-    const candidate = err as {
-      message?: string;
-      data?: string | { message?: string; error?: { what?: string } };
-    };
-
-    if (typeof candidate.data === 'string') return candidate.data;
-
-    if (candidate.data && typeof candidate.data === 'object') {
-      return candidate.data.message ?? candidate.data.error?.what ?? candidate.message ?? 'Wallet request failed.';
-    }
-
-    return candidate.message ?? 'Wallet request failed.';
-  }
-
-  return 'Wallet request failed.';
+function symbolCode(assetOrSymbol: string): string {
+  const parts = assetOrSymbol.trim().split(' ');
+  if (parts.length > 1) return parts[1];
+  const comma = assetOrSymbol.indexOf(',');
+  return comma >= 0 ? assetOrSymbol.slice(comma + 1) : assetOrSymbol;
 }
 
-function setWalletControls(enabled: boolean) {
-  tokenLaunchButton.disabled = !enabled;
-  campaignCreateButton.disabled = !enabled;
-  walletButtons.forEach((button) => {
-    button.disabled = !enabled;
-  });
-
-  if (enabled) {
-    tokenLaunchButton.textContent = 'Create token';
-    campaignCreateButton.textContent = 'Create launch campaign';
-  }
-}
-
-function requiredAccount(): string {
-  if (!account) throw new Error('Connect your Ultra Wallet first.');
-  return account;
-}
-
-function campaignId(): number {
-  const raw = document.querySelector<HTMLInputElement>('#campaign-id')!.value.trim();
-  const id = Number(raw);
-
-  if (!Number.isSafeInteger(id) || id <= 0) {
-    throw new Error('Enter a valid campaign ID.');
-  }
-
-  return id;
-}
-
-function unixSecondsFromLocalInput(id: string): number {
-  const value = document.querySelector<HTMLInputElement>(id)!.value;
-  const milliseconds = new Date(value).getTime();
-
-  if (!Number.isFinite(milliseconds)) {
-    throw new Error('Enter a valid campaign date and time.');
-  }
-
-  return Math.floor(milliseconds / 1000);
-}
-
-async function withButton(
-  button: HTMLButtonElement,
-  target: HTMLElement,
-  pendingText: string,
-  fn: () => Promise<string>,
-) {
-  const original = button.textContent || '';
-  button.disabled = true;
-  button.textContent = pendingText;
-
-  try {
-    const hash = await fn();
-    showStatus(target, `Transaction submitted: ${hash}`, 'ok');
-  } catch (err: unknown) {
-    showStatus(target, errorMessage(err), 'error');
-  } finally {
-    button.disabled = !account;
-    button.textContent = original;
-  }
+function statusLabel(status: number): string {
+  if (status === 0) return 'Draft';
+  if (status === 1) return 'Live';
+  if (status === 2) return 'Cancelled';
+  return 'Unknown';
 }
 
 async function signTransaction(contract: string, action: string, data: Record<string, unknown>): Promise<string> {
   requiredAccount();
 
-  const response = await wallet.signTransaction({
-    contract,
-    action,
-    data,
-  });
-
+  const response = await wallet.signTransaction({ contract, action, data });
   const hash = response.data.transactionHash;
-  if (!hash) throw new Error('Ultra Wallet submitted the transaction without returning a transaction hash.');
+
+  if (!hash) {
+    throw new Error('Ultra Wallet submitted the transaction without returning a transaction hash.');
+  }
+
   return hash;
 }
 
-async function latestCampaignForCreator(creator: string): Promise<number | undefined> {
+async function chainRows<T>(table: string, scope = PAD_CONTRACT, limit = 250): Promise<T[]> {
+  const response = await fetch(`${RPC_URL}/v1/chain/get_table_rows`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      json: true,
+      code: PAD_CONTRACT,
+      scope,
+      table,
+      limit,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Ultra RPC returned HTTP ${response.status}.`);
+  }
+
+  const payload = (await response.json()) as { rows?: T[] };
+  return payload.rows ?? [];
+}
+
+async function getLaunch(id: number): Promise<LaunchRow> {
+  const rows = await chainRows<LaunchRow>('launches');
+  const launch = rows.find((row) => Number(row.id) === id);
+  if (!launch) throw new Error(`Launch #${id} was not found on Ultra Testnet.`);
+  return launch;
+}
+
+function launchId(): number {
+  const id = Number(document.querySelector<HTMLInputElement>('#launch-id')!.value.trim());
+  if (!Number.isSafeInteger(id) || id <= 0) throw new Error('Enter a valid launch ID.');
+  return id;
+}
+
+function priceOf(launch: LaunchRow): number {
+  const payment = assetNumber(launch.virtual_payment) + assetNumber(launch.payment_reserve);
+  const tokens = assetNumber(launch.token_reserve);
+  return tokens > 0 ? payment / tokens : 0;
+}
+
+function graduationProgress(launch: LaunchRow): number {
+  const reserve = assetNumber(launch.payment_reserve);
+  const target = assetNumber(launch.graduation_target);
+  if (target <= 0) return 0;
+  return Math.min(100, (reserve / target) * 100);
+}
+
+function shortNumber(value: number): string {
+  if (!Number.isFinite(value)) return '0';
+  if (Math.abs(value) >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`;
+  if (Math.abs(value) >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
+  if (Math.abs(value) >= 1_000) return `${(value / 1_000).toFixed(2)}K`;
+  return value.toLocaleString(undefined, { maximumFractionDigits: 6 });
+}
+
+function safeHttpUrl(value: string): string | undefined {
   try {
-    const response = await fetch(`${RPC_URL}/v1/chain/get_table_rows`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        json: true,
-        code: PAD_CONTRACT,
-        scope: PAD_CONTRACT,
-        table: 'campaigns',
-        limit: 250,
-      }),
-    });
-
-    if (!response.ok) return undefined;
-
-    const payload = (await response.json()) as {
-      rows?: Array<{ id: number | string; creator: string }>;
-    };
-
-    const ids = (payload.rows ?? [])
-      .filter((row) => row.creator === creator)
-      .map((row) => Number(row.id))
-      .filter((id) => Number.isSafeInteger(id) && id > 0);
-
-    return ids.length ? Math.max(...ids) : undefined;
+    const url = new URL(value);
+    return ['http:', 'https:'].includes(url.protocol) ? url.toString() : undefined;
   } catch {
     return undefined;
   }
 }
 
-function setDefaultCampaignDates() {
-  const start = document.querySelector<HTMLInputElement>('#start-at')!;
-  const end = document.querySelector<HTMLInputElement>('#end-at')!;
+function renderSelectedLaunch(launch: LaunchRow) {
+  selectedLaunch.className = 'selected-launch';
+  selectedLaunch.replaceChildren();
 
-  const startDate = new Date(Date.now() + 5 * 60 * 1000);
-  const endDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const title = document.createElement('div');
+  title.className = 'selected-title';
 
-  const localValue = (date: Date) => {
-    const offset = date.getTimezoneOffset() * 60_000;
-    return new Date(date.getTime() - offset).toISOString().slice(0, 16);
-  };
+  const name = document.createElement('strong');
+  name.textContent = `${launch.token_name} · ${symbolCode(launch.sale_symbol)}`;
 
-  start.value = localValue(startDate);
-  end.value = localValue(endDate);
+  const badge = document.createElement('span');
+  badge.className = launch.graduated ? 'badge graduated' : 'badge';
+  badge.textContent = launch.graduated ? 'Curve target reached' : statusLabel(launch.status);
+
+  title.append(name, badge);
+
+  const stats = document.createElement('div');
+  stats.className = 'mini-stats';
+
+  const currentPrice = priceOf(launch);
+  const marketCap = currentPrice * assetNumber(launch.token_allocation);
+
+  const items = [
+    ['Price', `${currentPrice.toFixed(8)} ${PAYMENT_SYMBOL}`],
+    ['Market cap', `${shortNumber(marketCap)} ${PAYMENT_SYMBOL}`],
+    ['Curve reserve', launch.payment_reserve],
+    ['Volume', launch.volume],
+  ];
+
+  for (const [label, value] of items) {
+    const item = document.createElement('div');
+    const small = document.createElement('span');
+    small.textContent = label;
+    const strong = document.createElement('strong');
+    strong.textContent = value;
+    item.append(small, strong);
+    stats.append(item);
+  }
+
+  const progress = document.createElement('div');
+  progress.className = 'progress-wrap';
+  const progressTop = document.createElement('div');
+  progressTop.className = 'progress-top';
+  progressTop.textContent = `Graduation progress · ${graduationProgress(launch).toFixed(1)}%`;
+  const track = document.createElement('div');
+  track.className = 'progress-track';
+  const fill = document.createElement('div');
+  fill.className = 'progress-fill';
+  fill.style.width = `${graduationProgress(launch)}%`;
+  track.append(fill);
+  progress.append(progressTop, track);
+
+  selectedLaunch.append(title, stats, progress);
+}
+
+function renderMarkets(launches: LaunchRow[]) {
+  marketGrid.replaceChildren();
+
+  if (!launches.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.textContent = 'No meme launches found on the configured Ultra network.';
+    marketGrid.append(empty);
+    return;
+  }
+
+  for (const launch of [...launches].reverse()) {
+    const card = document.createElement('article');
+    card.className = 'market-card';
+
+    const image = document.createElement('div');
+    image.className = 'token-image';
+
+    const imageUrl = safeHttpUrl(launch.image_uri);
+    if (imageUrl) {
+      const img = document.createElement('img');
+      img.src = imageUrl;
+      img.alt = '';
+      img.loading = 'lazy';
+      image.append(img);
+    } else {
+      image.textContent = symbolCode(launch.sale_symbol).slice(0, 2);
+    }
+
+    const body = document.createElement('div');
+    body.className = 'market-body';
+
+    const top = document.createElement('div');
+    top.className = 'market-card-top';
+
+    const heading = document.createElement('div');
+    const name = document.createElement('h3');
+    name.textContent = launch.token_name;
+    const symbol = document.createElement('span');
+    symbol.textContent = symbolCode(launch.sale_symbol);
+    heading.append(name, symbol);
+
+    const badge = document.createElement('span');
+    badge.className = launch.graduated ? 'badge graduated' : 'badge';
+    badge.textContent = launch.graduated ? 'Graduated' : statusLabel(launch.status);
+
+    top.append(heading, badge);
+
+    const description = document.createElement('p');
+    description.textContent = launch.description || 'No description.';
+
+    const price = priceOf(launch);
+    const marketCap = price * assetNumber(launch.token_allocation);
+
+    const stats = document.createElement('div');
+    stats.className = 'card-stats';
+
+    for (const [label, value] of [
+      ['MCap', `${shortNumber(marketCap)} ${PAYMENT_SYMBOL}`],
+      ['Volume', launch.volume],
+      ['Trades', String(launch.trade_count)],
+    ]) {
+      const item = document.createElement('div');
+      const small = document.createElement('span');
+      small.textContent = label;
+      const strong = document.createElement('strong');
+      strong.textContent = value;
+      item.append(small, strong);
+      stats.append(item);
+    }
+
+    const progress = document.createElement('div');
+    progress.className = 'progress-track';
+    const fill = document.createElement('div');
+    fill.className = 'progress-fill';
+    fill.style.width = `${graduationProgress(launch)}%`;
+    progress.append(fill);
+
+    const open = document.createElement('button');
+    open.className = 'secondary card-open';
+    open.textContent = `Open launch #${launch.id}`;
+    open.addEventListener('click', () => {
+      document.querySelector<HTMLInputElement>('#launch-id')!.value = String(launch.id);
+      renderSelectedLaunch(launch);
+      window.scrollTo({ top: 620, behavior: 'smooth' });
+    });
+
+    body.append(top, description, stats, progress, open);
+    card.append(image, body);
+    marketGrid.append(card);
+  }
+}
+
+async function refreshMarkets() {
+  const launches = await chainRows<LaunchRow>('launches');
+  renderMarkets(launches);
+}
+
+async function refreshSelected() {
+  const launch = await getLaunch(launchId());
+  renderSelectedLaunch(launch);
 }
 
 document.querySelectorAll<HTMLButtonElement>('.tab').forEach((button) => {
@@ -389,16 +555,18 @@ document.querySelectorAll<HTMLButtonElement>('.tab').forEach((button) => {
 
     button.classList.add('active');
     document.querySelector<HTMLElement>(`#${button.dataset.tab}-panel`)!.classList.add('active');
+
+    if (button.dataset.tab === 'meme') {
+      void refreshMarkets().catch((err) => showStatus('#meme-status', errorMessage(err), 'error'));
+    }
   });
 });
 
 connectButton.addEventListener('click', async () => {
-  const launcherStatus = statusElement('#launcher-status');
-
   if (!('ultra' in window)) {
     showStatus(
-      launcherStatus,
-      'Ultra Wallet Extension was not detected. Testnet requires the Ultra browser extension.',
+      '#token-status',
+      'Ultra Wallet Extension was not detected. Ultra Testnet requires the browser extension.',
       'error',
     );
     return;
@@ -407,400 +575,295 @@ connectButton.addEventListener('click', async () => {
   connectButton.disabled = true;
 
   try {
-    showStatus(launcherStatus, 'Checking Ultra Wallet network…');
+    showStatus('#token-status', 'Checking Ultra Wallet network…');
 
     const chainResponse = await wallet.getChainId();
     const currentChainId = chainResponse.data;
 
     if (currentChainId !== ULTRA_TESTNET_CHAIN_ID) {
-      const currentNetwork =
-        currentChainId === ULTRA_MAINNET_CHAIN_ID
-          ? 'Mainnet'
-          : currentChainId
-            ? `another network (${currentChainId.slice(0, 10)}…)`
-            : 'an unavailable network';
-
-      showStatus(
-        launcherStatus,
-        `Ultra Wallet is on ${currentNetwork}. Hashed is currently Testnet-only. Trying to switch to Ultra Testnet…`,
-        'info',
-      );
-
       try {
-        // This succeeds automatically for origins that the extension already trusts.
-        // On a first connection Ultra requires the user to choose Testnet manually.
         await wallet.switchNetwork(ULTRA_TESTNET_CHAIN_ID);
       } catch (switchErr: unknown) {
-        const code = walletErrorCode(switchErr);
-
-        if (code === 4100) {
+        if (walletErrorCode(switchErr) === 4100 || currentChainId === ULTRA_MAINNET_CHAIN_ID) {
           throw new Error(
-            'Your wallet is on Ultra Mainnet. Open the Ultra Wallet extension → Networks → Testnet, switch to Testnet, then click Connect again.',
+            'Ultra Wallet is on Mainnet. Open the extension → Networks → Testnet, switch to Testnet, then click Connect again.',
           );
         }
-
-        throw new Error(
-          `Could not switch Ultra Wallet to Testnet automatically. Open the Ultra Wallet extension → Networks → Testnet, switch networks, then try again. ${errorMessage(switchErr)}`,
-        );
-      }
-
-      const switched = await wallet.getChainId();
-      if (switched.data !== ULTRA_TESTNET_CHAIN_ID) {
-        throw new Error(
-          'Ultra Wallet did not switch to Testnet. Open the extension → Networks → Testnet, then click Connect again.',
-        );
+        throw switchErr;
       }
     }
 
-    showStatus(launcherStatus, 'Connecting to Ultra Testnet…');
     const { data } = await wallet.connect();
     account = data.blockchainid;
 
     if (!account) {
-      throw new Error(
-        'Ultra Testnet is selected, but the wallet did not return a Testnet account. A Testnet account is required before Hashed can sign transactions.',
-      );
+      throw new Error('Ultra Wallet did not return a Testnet blockchain account.');
     }
 
     connectButton.textContent = account;
     issuer.textContent = account;
-    campaignCreator.textContent = account;
     setWalletControls(true);
-    showStatus(launcherStatus, 'Wallet connected to Ultra Testnet.', 'ok');
+    showStatus('#token-status', 'Wallet connected to Ultra Testnet.', 'ok');
   } catch (err: unknown) {
     account = undefined;
     setWalletControls(false);
-
-    const message = errorMessage(err);
-
-    if (message.includes('a9c481dfbc7d9506dc7e87e9a137c931b0a9303f64fd7a1d08b8230133920097')) {
-      showStatus(
-        launcherStatus,
-        'Your Ultra Wallet is currently on Mainnet. Hashed is Testnet-only right now. Open Ultra Wallet → Networks → Testnet, then click Connect again.',
-        'error',
-      );
-    } else {
-      showStatus(launcherStatus, message, 'error');
-    }
+    showStatus('#token-status', errorMessage(err), 'error');
   } finally {
     connectButton.disabled = false;
   }
 });
 
-document.querySelector<HTMLFormElement>('#launch-form')!.addEventListener('submit', async (event) => {
+document.querySelector<HTMLFormElement>('#token-form')!.addEventListener('submit', async (event) => {
   event.preventDefault();
-  const target = statusElement('#launcher-status');
+
+  const creator = requiredAccount();
+  const tokenName = document.querySelector<HTMLInputElement>('#token-name')!.value.trim();
+  const tokenSymbol = document.querySelector<HTMLInputElement>('#token-symbol')!.value.trim().toUpperCase();
+  const maxRaw = document.querySelector<HTMLInputElement>('#token-max')!.value;
+  const initialRaw = document.querySelector<HTMLInputElement>('#token-initial')!.value;
+  const decimals = Number(document.querySelector<HTMLSelectElement>('#token-decimals')!.value);
+  const metadataUri = document.querySelector<HTMLInputElement>('#token-uri')!.value.trim();
+  const memeReady = document.querySelector<HTMLInputElement>('#meme-ready')!.checked;
 
   try {
-    const creator = requiredAccount();
-    const tokenName = document.querySelector<HTMLInputElement>('#name')!.value.trim();
-    const tokenSymbol = document.querySelector<HTMLInputElement>('#symbol')!.value.trim().toUpperCase();
-    const maxRaw = document.querySelector<HTMLInputElement>('#max')!.value;
-    const initialRaw = document.querySelector<HTMLInputElement>('#initial')!.value;
-    const decimals = Number(document.querySelector<HTMLSelectElement>('#decimals')!.value);
-    const metadataUri = document.querySelector<HTMLInputElement>('#uri')!.value.trim();
-
-    if (utf8Length(tokenName) === 0 || utf8Length(tokenName) > 64) {
-      throw new Error('Token name must be between 1 and 64 UTF-8 bytes.');
-    }
-
-    if (!/^[A-Z]{1,7}$/.test(tokenSymbol)) {
-      throw new Error('Symbol must be 1–7 uppercase A–Z characters.');
-    }
-
-    if (![4, 6, 8].includes(decimals)) {
-      throw new Error('Unsupported token precision.');
-    }
-
-    if (utf8Length(metadataUri) > 256) {
-      throw new Error('Metadata URI must be at most 256 UTF-8 bytes.');
-    }
+    if (!/^[A-Z]{1,7}$/.test(tokenSymbol)) throw new Error('Symbol must be 1–7 uppercase A–Z characters.');
+    if (utf8Length(tokenName) === 0 || utf8Length(tokenName) > 64) throw new Error('Token name must be 1–64 bytes.');
+    if (utf8Length(metadataUri) > 256) throw new Error('Metadata URI is too long.');
 
     const maximumSupply = formatAsset(maxRaw, decimals, tokenSymbol);
     const initialSupply = formatAsset(initialRaw, decimals, tokenSymbol);
 
     if (maximumSupply.atomic <= 0n) throw new Error('Maximum supply must be greater than zero.');
-    if (initialSupply.atomic > maximumSupply.atomic) {
-      throw new Error('Initial supply cannot exceed maximum supply.');
+    if (initialSupply.atomic > maximumSupply.atomic) throw new Error('Initial supply cannot exceed maximum supply.');
+    if (memeReady && initialSupply.atomic !== maximumSupply.atomic) {
+      throw new Error('A meme-ready token must issue its full maximum supply before minting is locked.');
     }
 
-    await withButton(tokenLaunchButton, target, 'Confirm in wallet…', () =>
-      signTransaction(TOKEN_CONTRACT, 'launch', {
+    createTokenButton.disabled = true;
+    createTokenButton.textContent = 'Confirm token creation…';
+
+    const launchHash = await signTransaction(TOKEN_CONTRACT, 'launch', {
+      issuer: creator,
+      maximum_supply: maximumSupply.asset,
+      initial_supply: initialSupply.asset,
+      token_name: tokenName,
+      metadata_uri: metadataUri,
+    });
+
+    let message = `Token created: ${launchHash}`;
+
+    if (memeReady) {
+      createTokenButton.textContent = 'Confirm permanent mint lock…';
+
+      const lockHash = await signTransaction(TOKEN_CONTRACT, 'lockmint', {
         issuer: creator,
-        maximum_supply: maximumSupply.asset,
-        initial_supply: initialSupply.asset,
-        token_name: tokenName,
-        metadata_uri: metadataUri,
-      }),
-    );
-
-    document.querySelector<HTMLInputElement>('#sale-symbol')!.value = tokenSymbol;
-    document.querySelector<HTMLSelectElement>('#sale-decimals')!.value = String(decimals);
-    document.querySelector<HTMLInputElement>('#ops-symbol')!.value = tokenSymbol;
-    document.querySelector<HTMLSelectElement>('#ops-decimals')!.value = String(decimals);
-  } catch (err: unknown) {
-    showStatus(target, errorMessage(err), 'error');
-  }
-});
-
-document.querySelector<HTMLFormElement>('#campaign-form')!.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  const target = statusElement('#campaign-status');
-
-  try {
-    const creator = requiredAccount();
-    const saleSymbol = document.querySelector<HTMLInputElement>('#sale-symbol')!.value.trim().toUpperCase();
-    const saleDecimals = Number(document.querySelector<HTMLSelectElement>('#sale-decimals')!.value);
-    const allocation = formatAsset(
-      document.querySelector<HTMLInputElement>('#sale-allocation')!.value,
-      saleDecimals,
-      saleSymbol,
-    );
-    const rate = formatAsset(
-      document.querySelector<HTMLInputElement>('#sale-rate')!.value,
-      saleDecimals,
-      saleSymbol,
-    );
-    const softCap = formatAsset(
-      document.querySelector<HTMLInputElement>('#soft-cap')!.value,
-      PAYMENT_DECIMALS,
-      PAYMENT_SYMBOL,
-    );
-    const hardCap = formatAsset(
-      document.querySelector<HTMLInputElement>('#hard-cap')!.value,
-      PAYMENT_DECIMALS,
-      PAYMENT_SYMBOL,
-    );
-    const minContribution = formatAsset(
-      document.querySelector<HTMLInputElement>('#min-contribution')!.value,
-      PAYMENT_DECIMALS,
-      PAYMENT_SYMBOL,
-    );
-    const maxContribution = formatAsset(
-      document.querySelector<HTMLInputElement>('#max-contribution')!.value,
-      PAYMENT_DECIMALS,
-      PAYMENT_SYMBOL,
-    );
-    const startAt = unixSecondsFromLocalInput('#start-at');
-    const endAt = unixSecondsFromLocalInput('#end-at');
-    const allowlistEnabled = document.querySelector<HTMLInputElement>('#allowlist-enabled')!.checked;
-
-    if (!/^[A-Z]{1,7}$/.test(saleSymbol)) throw new Error('Enter a valid sale token symbol.');
-    if (allocation.atomic <= 0n) throw new Error('Token allocation must be greater than zero.');
-    if (rate.atomic <= 0n) throw new Error('Token rate must be greater than zero.');
-    if (hardCap.atomic <= 0n) throw new Error('Hard cap must be greater than zero.');
-    if (softCap.atomic > hardCap.atomic) throw new Error('Soft cap cannot exceed hard cap.');
-    if (minContribution.atomic <= 0n) throw new Error('Minimum contribution must be greater than zero.');
-    if (maxContribution.atomic < minContribution.atomic) {
-      throw new Error('Maximum contribution must be at least the minimum contribution.');
-    }
-    if (maxContribution.atomic > hardCap.atomic) {
-      throw new Error('Maximum contribution cannot exceed the hard cap.');
-    }
-    if (endAt <= startAt) throw new Error('Campaign end time must be after start time.');
-
-    await withButton(campaignCreateButton, target, 'Confirm campaign…', async () => {
-      const hash = await signTransaction(PAD_CONTRACT, 'createcamp', {
-        creator,
-        sale_contract: TOKEN_CONTRACT,
-        token_allocation: allocation.asset,
-        payment_contract: PAYMENT_CONTRACT,
-        payment_symbol: `${PAYMENT_DECIMALS},${PAYMENT_SYMBOL}`,
-        tokens_per_payment: rate.asset,
-        start_at: startAt,
-        end_at: endAt,
-        soft_cap: softCap.asset,
-        hard_cap: hardCap.asset,
-        min_contribution: minContribution.asset,
-        max_contribution: maxContribution.asset,
-        allowlist_enabled: allowlistEnabled,
+        symcode: tokenSymbol,
       });
 
-      document.querySelector<HTMLInputElement>('#ops-symbol')!.value = saleSymbol;
-      document.querySelector<HTMLSelectElement>('#ops-decimals')!.value = String(saleDecimals);
-      document.querySelector<HTMLInputElement>('#ops-allocation')!.value =
-        document.querySelector<HTMLInputElement>('#sale-allocation')!.value;
+      message += ` · Minting permanently locked: ${lockHash}`;
+    }
 
-      const latestId = await latestCampaignForCreator(creator);
-      if (latestId) {
-        document.querySelector<HTMLInputElement>('#campaign-id')!.value = String(latestId);
-      }
+    document.querySelector<HTMLInputElement>('#meme-name')!.value = tokenName;
+    document.querySelector<HTMLInputElement>('#meme-symbol')!.value = tokenSymbol;
+    document.querySelector<HTMLSelectElement>('#meme-decimals')!.value = String(decimals);
 
-      return hash;
-    });
+    showStatus('#token-status', message, 'ok');
   } catch (err: unknown) {
-    showStatus(target, errorMessage(err), 'error');
+    showStatus('#token-status', errorMessage(err), 'error');
+  } finally {
+    createTokenButton.disabled = !account;
+    createTokenButton.textContent = 'Create token';
   }
 });
 
-const operationsStatus = statusElement('#operations-status');
+lockMintButton.addEventListener('click', async () => {
+  try {
+    const creator = requiredAccount();
+    const symbol = document.querySelector<HTMLInputElement>('#meme-symbol')!.value.trim().toUpperCase();
 
-document.querySelector<HTMLButtonElement>('#fund-campaign')!.addEventListener('click', async (event) => {
-  const button = event.currentTarget as HTMLButtonElement;
+    if (!/^[A-Z]{1,7}$/.test(symbol)) throw new Error('Enter a valid token symbol first.');
+
+    lockMintButton.disabled = true;
+    lockMintButton.textContent = 'Confirm permanent lock…';
+
+    const hash = await signTransaction(TOKEN_CONTRACT, 'lockmint', {
+      issuer: creator,
+      symcode: symbol,
+    });
+
+    showStatus('#meme-status', `Minting permanently locked: ${hash}`, 'ok');
+  } catch (err: unknown) {
+    showStatus('#meme-status', errorMessage(err), 'error');
+  } finally {
+    lockMintButton.disabled = !account;
+    lockMintButton.textContent = 'Lock minting';
+  }
+});
+
+document.querySelector<HTMLFormElement>('#meme-form')!.addEventListener('submit', async (event) => {
+  event.preventDefault();
 
   try {
     const creator = requiredAccount();
-    const id = campaignId();
-    const symbol = document.querySelector<HTMLInputElement>('#ops-symbol')!.value.trim().toUpperCase();
-    const decimals = Number(document.querySelector<HTMLSelectElement>('#ops-decimals')!.value);
-    const allocation = formatAsset(
-      document.querySelector<HTMLInputElement>('#ops-allocation')!.value,
-      decimals,
-      symbol,
-    );
+    const symbol = document.querySelector<HTMLInputElement>('#meme-symbol')!.value.trim().toUpperCase();
+    const decimals = Number(document.querySelector<HTMLSelectElement>('#meme-decimals')!.value);
+    const tokenName = document.querySelector<HTMLInputElement>('#meme-name')!.value.trim();
+    const imageUri = document.querySelector<HTMLInputElement>('#meme-image')!.value.trim();
+    const description = document.querySelector<HTMLTextAreaElement>('#meme-description')!.value.trim();
+    const website = document.querySelector<HTMLInputElement>('#meme-website')!.value.trim();
+    const xUrl = document.querySelector<HTMLInputElement>('#meme-x')!.value.trim();
+    const telegramUrl = document.querySelector<HTMLInputElement>('#meme-telegram')!.value.trim();
 
-    await withButton(button, operationsStatus, 'Confirm deposit…', () =>
-      signTransaction(TOKEN_CONTRACT, 'transfer', {
-        from: creator,
-        to: PAD_CONTRACT,
-        quantity: allocation.asset,
-        memo: `deposit:${id}`,
-      }),
-    );
+    if (!/^[A-Z]{1,7}$/.test(symbol)) throw new Error('Enter a valid token symbol.');
+    if (!imageUri) throw new Error('Add an image URI for the meme token.');
+
+    createMemeButton.disabled = true;
+    createMemeButton.textContent = 'Confirm meme launch…';
+
+    const hash = await signTransaction(PAD_CONTRACT, 'creatememe', {
+      creator,
+      sale_symbol: `${decimals},${symbol}`,
+      token_name: tokenName,
+      image_uri: imageUri,
+      description,
+      website,
+      x_url: xUrl,
+      telegram_url: telegramUrl,
+    });
+
+    showStatus('#meme-status', `Meme launch created: ${hash}`, 'ok');
+
+    await refreshMarkets();
+    const rows = await chainRows<LaunchRow>('launches');
+    const creatorRows = rows.filter((row) => row.creator === creator);
+    const latest = creatorRows.sort((a, b) => Number(b.id) - Number(a.id))[0];
+
+    if (latest) {
+      document.querySelector<HTMLInputElement>('#launch-id')!.value = String(latest.id);
+      renderSelectedLaunch(latest);
+    }
   } catch (err: unknown) {
-    showStatus(operationsStatus, errorMessage(err), 'error');
+    showStatus('#meme-status', errorMessage(err), 'error');
+  } finally {
+    createMemeButton.disabled = !account;
+    createMemeButton.textContent = 'Create meme launch';
   }
 });
 
-document.querySelector<HTMLButtonElement>('#activate-campaign')!.addEventListener('click', async (event) => {
-  const button = event.currentTarget as HTMLButtonElement;
-
+goLiveButton.addEventListener('click', async () => {
   try {
-    await withButton(button, operationsStatus, 'Confirm activation…', () =>
-      signTransaction(PAD_CONTRACT, 'activate', { campaign_id: campaignId() }),
-    );
+    const creator = requiredAccount();
+    const launch = await getLaunch(launchId());
+
+    if (launch.creator !== creator) {
+      throw new Error('Only the launch creator can escrow the fixed token supply.');
+    }
+
+    if (launch.status !== 0) {
+      throw new Error('This launch is no longer waiting for token escrow.');
+    }
+
+    goLiveButton.disabled = true;
+    goLiveButton.textContent = 'Confirm full-supply escrow…';
+
+    const hash = await signTransaction(launch.sale_contract, 'transfer', {
+      from: creator,
+      to: PAD_CONTRACT,
+      quantity: launch.token_allocation,
+      memo: `deposit:${launch.id}`,
+    });
+
+    showStatus('#live-status', `Launch is live: ${hash}`, 'ok');
+    await refreshSelected();
+    await refreshMarkets();
   } catch (err: unknown) {
-    showStatus(operationsStatus, errorMessage(err), 'error');
+    showStatus('#live-status', errorMessage(err), 'error');
+  } finally {
+    goLiveButton.disabled = !account;
+    goLiveButton.textContent = 'Escrow supply & go live';
   }
 });
 
-document.querySelector<HTMLButtonElement>('#finalize-campaign')!.addEventListener('click', async (event) => {
-  const button = event.currentTarget as HTMLButtonElement;
-
-  try {
-    await withButton(button, operationsStatus, 'Confirm finalization…', () =>
-      signTransaction(PAD_CONTRACT, 'finalize', { campaign_id: campaignId() }),
-    );
-  } catch (err: unknown) {
-    showStatus(operationsStatus, errorMessage(err), 'error');
-  }
-});
-
-document.querySelector<HTMLButtonElement>('#withdraw-proceeds')!.addEventListener('click', async (event) => {
-  const button = event.currentTarget as HTMLButtonElement;
-
-  try {
-    await withButton(button, operationsStatus, 'Confirm withdrawal…', () =>
-      signTransaction(PAD_CONTRACT, 'withdraw', { campaign_id: campaignId() }),
-    );
-  } catch (err: unknown) {
-    showStatus(operationsStatus, errorMessage(err), 'error');
-  }
-});
-
-document.querySelector<HTMLButtonElement>('#reclaim-tokens')!.addEventListener('click', async (event) => {
-  const button = event.currentTarget as HTMLButtonElement;
-
-  try {
-    await withButton(button, operationsStatus, 'Confirm reclaim…', () =>
-      signTransaction(PAD_CONTRACT, 'reclaim', { campaign_id: campaignId() }),
-    );
-  } catch (err: unknown) {
-    showStatus(operationsStatus, errorMessage(err), 'error');
-  }
-});
-
-document.querySelector<HTMLButtonElement>('#buy-campaign')!.addEventListener('click', async (event) => {
-  const button = event.currentTarget as HTMLButtonElement;
-
+buyButton.addEventListener('click', async () => {
   try {
     const buyer = requiredAccount();
-    const id = campaignId();
+    const launch = await getLaunch(launchId());
     const payment = formatAsset(
       document.querySelector<HTMLInputElement>('#buy-amount')!.value,
       PAYMENT_DECIMALS,
       PAYMENT_SYMBOL,
     );
 
-    if (payment.atomic <= 0n) throw new Error('Contribution must be greater than zero.');
+    if (launch.status !== 1) throw new Error('This meme launch is not live.');
+    if (payment.atomic <= 0n) throw new Error('Buy amount must be greater than zero.');
 
-    await withButton(button, operationsStatus, 'Confirm contribution…', () =>
-      signTransaction(PAYMENT_CONTRACT, 'transfer', {
-        from: buyer,
-        to: PAD_CONTRACT,
-        quantity: payment.asset,
-        memo: `buy:${id}`,
-      }),
+    buyButton.disabled = true;
+    buyButton.textContent = 'Confirm buy…';
+
+    const hash = await signTransaction(PAYMENT_CONTRACT, 'transfer', {
+      from: buyer,
+      to: PAD_CONTRACT,
+      quantity: payment.asset,
+      memo: `buy:${launch.id}`,
+    });
+
+    showStatus('#trade-status', `Buy confirmed: ${hash}`, 'ok');
+    await refreshSelected();
+    await refreshMarkets();
+  } catch (err: unknown) {
+    showStatus('#trade-status', errorMessage(err), 'error');
+  } finally {
+    buyButton.disabled = !account;
+    buyButton.textContent = 'Buy token';
+  }
+});
+
+sellButton.addEventListener('click', async () => {
+  try {
+    const seller = requiredAccount();
+    const launch = await getLaunch(launchId());
+    const symbol = symbolCode(launch.sale_symbol);
+    const decimals = Number(String(launch.sale_symbol).split(',')[0]);
+    const sale = formatAsset(
+      document.querySelector<HTMLInputElement>('#sell-amount')!.value,
+      decimals,
+      symbol,
     );
+
+    if (launch.status !== 1) throw new Error('This meme launch is not live.');
+    if (sale.atomic <= 0n) throw new Error('Sell amount must be greater than zero.');
+
+    sellButton.disabled = true;
+    sellButton.textContent = 'Confirm sell…';
+
+    const hash = await signTransaction(launch.sale_contract, 'transfer', {
+      from: seller,
+      to: PAD_CONTRACT,
+      quantity: sale.asset,
+      memo: `sell:${launch.id}`,
+    });
+
+    showStatus('#trade-status', `Sell confirmed: ${hash}`, 'ok');
+    await refreshSelected();
+    await refreshMarkets();
   } catch (err: unknown) {
-    showStatus(operationsStatus, errorMessage(err), 'error');
+    showStatus('#trade-status', errorMessage(err), 'error');
+  } finally {
+    sellButton.disabled = !account;
+    sellButton.textContent = 'Sell token';
   }
 });
 
-document.querySelector<HTMLButtonElement>('#claim-tokens')!.addEventListener('click', async (event) => {
-  const button = event.currentTarget as HTMLButtonElement;
-
-  try {
-    const participant = requiredAccount();
-
-    await withButton(button, operationsStatus, 'Confirm claim…', () =>
-      signTransaction(PAD_CONTRACT, 'claim', {
-        campaign_id: campaignId(),
-        participant,
-      }),
-    );
-  } catch (err: unknown) {
-    showStatus(operationsStatus, errorMessage(err), 'error');
-  }
+document.querySelector<HTMLButtonElement>('#refresh-launch')!.addEventListener('click', () => {
+  void refreshSelected().catch((err) => showStatus('#trade-status', errorMessage(err), 'error'));
 });
 
-document.querySelector<HTMLButtonElement>('#refund-payment')!.addEventListener('click', async (event) => {
-  const button = event.currentTarget as HTMLButtonElement;
-
-  try {
-    const participant = requiredAccount();
-
-    await withButton(button, operationsStatus, 'Confirm refund…', () =>
-      signTransaction(PAD_CONTRACT, 'refund', {
-        campaign_id: campaignId(),
-        participant,
-      }),
-    );
-  } catch (err: unknown) {
-    showStatus(operationsStatus, errorMessage(err), 'error');
-  }
+document.querySelector<HTMLButtonElement>('#refresh-markets')!.addEventListener('click', () => {
+  void refreshMarkets().catch((err) => showStatus('#meme-status', errorMessage(err), 'error'));
 });
 
-async function updateAllowlist(button: HTMLButtonElement, allowed: boolean) {
-  requiredAccount();
-
-  const targetAccount = document.querySelector<HTMLInputElement>('#allowlist-account')!.value.trim();
-  if (!targetAccount) throw new Error('Enter an Ultra account to update.');
-
-  await withButton(button, operationsStatus, allowed ? 'Adding…' : 'Removing…', () =>
-    signTransaction(PAD_CONTRACT, 'setallow', {
-      campaign_id: campaignId(),
-      account: targetAccount,
-      allowed,
-    }),
-  );
-}
-
-document.querySelector<HTMLButtonElement>('#allow-account')!.addEventListener('click', async (event) => {
-  try {
-    await updateAllowlist(event.currentTarget as HTMLButtonElement, true);
-  } catch (err: unknown) {
-    showStatus(operationsStatus, errorMessage(err), 'error');
-  }
+document.querySelector<HTMLInputElement>('#launch-id')!.addEventListener('change', () => {
+  void refreshSelected().catch(() => undefined);
 });
 
-document.querySelector<HTMLButtonElement>('#remove-account')!.addEventListener('click', async (event) => {
-  try {
-    await updateAllowlist(event.currentTarget as HTMLButtonElement, false);
-  } catch (err: unknown) {
-    showStatus(operationsStatus, errorMessage(err), 'error');
-  }
-});
-
-setDefaultCampaignDates();
 setWalletControls(false);
