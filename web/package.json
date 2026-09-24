@@ -9,7 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@ultraos/wallet-sdk": "^0.6.1"
+    "@ultraos/wallet-sdk": "^0.6.1",
+    "eosjs": "^22.1.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
