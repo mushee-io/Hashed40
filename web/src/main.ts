@@ -321,7 +321,9 @@ async function signTransaction(contract: string, action: string, data: Record<st
     data,
   });
 
-  return response.data.transactionHash;
+  const hash = response.data.transactionHash;
+  if (!hash) throw new Error('Ultra Wallet submitted the transaction without returning a transaction hash.');
+  return hash;
 }
 
 async function latestCampaignForCreator(creator: string): Promise<number | undefined> {
@@ -698,36 +700,3 @@ document.querySelector<HTMLButtonElement>('#refund-payment')!.addEventListener('
 });
 
 async function updateAllowlist(button: HTMLButtonElement, allowed: boolean) {
-  const creator = requiredAccount();
-  void creator;
-  const targetAccount = document.querySelector<HTMLInputElement>('#allowlist-account')!.value.trim();
-
-  if (!targetAccount) throw new Error('Enter an Ultra account to update.');
-
-  await withButton(button, operationsStatus, allowed ? 'Adding…' : 'Removing…', () =>
-    signTransaction(PAD_CONTRACT, 'setallow', {
-      campaign_id: campaignId(),
-      account: targetAccount,
-      allowed,
-    }),
-  );
-}
-
-document.querySelector<HTMLButtonElement>('#allow-account')!.addEventListener('click', async (event) => {
-  try {
-    await updateAllowlist(event.currentTarget as HTMLButtonElement, true);
-  } catch (err: unknown) {
-    showStatus(operationsStatus, errorMessage(err), 'error');
-  }
-});
-
-document.querySelector<HTMLButtonElement>('#remove-account')!.addEventListener('click', async (event) => {
-  try {
-    await updateAllowlist(event.currentTarget as HTMLButtonElement, false);
-  } catch (err: unknown) {
-    showStatus(operationsStatus, errorMessage(err), 'error');
-  }
-});
-
-setDefaultCampaignDates();
-setWalletControls(false);
