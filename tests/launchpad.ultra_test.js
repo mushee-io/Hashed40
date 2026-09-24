@@ -288,7 +288,7 @@ module.exports = class test {
 
                 const trades = await common.getTable('hashedpad', '1', 'trades');
                 assert(trades.rows.length === 3, 'recent trade history was not recorded');
-                assert(trades.rows[2].is_buy === false, 'third trade should be a sell');
+                assert(!Boolean(trades.rows[2].is_buy), 'third trade should be a sell');
             },
 
             'blocks new minting after the meme token has launched': async () => {
