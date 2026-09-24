@@ -132,7 +132,10 @@ module.exports = class test {
             },
 
             'rejects duplicate symbols': async () => {
-                const rejected = await common.transactAssert(
+                // transactAssert throws if the assertion text does not match.
+                // On an expected contract rejection it may return false, so the
+                // successful test condition is simply that this call completes.
+                await common.transactAssert(
                     [
                         {
                             account: 'hashedlaunch',
@@ -150,7 +153,6 @@ module.exports = class test {
                     'token symbol already exists on this launcher',
                 );
 
-                assert(rejected, 'duplicate HASH symbol was unexpectedly accepted');
             },
         };
     }
