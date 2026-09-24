@@ -14,20 +14,19 @@ module.exports = class test {
             return result;
         };
 
-        const balanceString = async (account, symbol) => {
+        const balance = async (account, symbol) => {
             const rows = await common.getTable('hashedlaunch', account, 'accounts');
             const row = rows.rows.find((entry) => entry.balance.endsWith(` ${symbol}`));
             return row ? row.balance : null;
         };
 
-        const balanceAmount = async (account, symbol) => {
-            const balance = await balanceString(account, symbol);
-            if (!balance) return 0;
-            return Number(balance.split(' ')[0]);
+        const amount = (asset) => {
+            if (!asset) return 0;
+            return Number(asset.split(' ')[0]);
         };
 
         return {
-            'bootstraps Hashed launcher and meme launchpad': async () => {
+            'bootstraps Hashed token launcher and meme launchpad': async () => {
                 const accounts = [
                     'hashedlaunch',
                     'hashedpad',
@@ -41,9 +40,7 @@ module.exports = class test {
                     const publicKey = await keychain.generateAndReturnPublicKey(account);
                     assert(publicKey, `could not generate key for ${account}`);
 
-                    if (account === 'hashedpad') {
-                        padPublicKey = publicKey;
-                    }
+                    if (account === 'hashedpad') padPublicKey = publicKey;
 
                     const created = await cleos(
                         `create account eosio ${account} ${publicKey} ${publicKey}`,
@@ -54,21 +51,17 @@ module.exports = class test {
 
                 const buildDir = path.resolve(__dirname, '../contract/build');
 
-                assert(
-                    await cleos(
-                        `set contract hashedlaunch "${buildDir}" hashedlaunch.wasm hashedlaunch.abi -p hashedlaunch@active`,
-                        { swallow: false, fetch: false },
-                    ),
-                    'hashedlaunch deployment failed',
+                const launcherDeployed = await cleos(
+                    `set contract hashedlaunch "${buildDir}" hashedlaunch.wasm hashedlaunch.abi -p hashedlaunch@active`,
+                    { swallow: false, fetch: false },
                 );
+                assert(launcherDeployed, 'hashedlaunch deployment failed');
 
-                assert(
-                    await cleos(
-                        `set contract hashedpad "${buildDir}" hashedpad.wasm hashedpad.abi -p hashedpad@active`,
-                        { swallow: false, fetch: false },
-                    ),
-                    'hashedpad deployment failed',
+                const padDeployed = await cleos(
+                    `set contract hashedpad "${buildDir}" hashedpad.wasm hashedpad.abi -p hashedpad@active`,
+                    { swallow: false, fetch: false },
                 );
+                assert(padDeployed, 'hashedpad deployment failed');
 
                 const activeAuthority = JSON.stringify({
                     threshold: 1,
@@ -82,51 +75,33 @@ module.exports = class test {
                     waits: [],
                 });
 
-                assert(
-                    await cleos(
-                        `set account permission hashedpad active '${activeAuthority}' owner -p hashedpad@owner`,
-                        { swallow: false, fetch: false },
-                    ),
-                    'could not add hashedpad@eosio.code permission',
+                const permissionUpdated = await cleos(
+                    `set account permission hashedpad active '${activeAuthority}' owner -p hashedpad@owner`,
+                    { swallow: false, fetch: false },
                 );
+                assert(permissionUpdated, 'could not add hashedpad@eosio.code permission');
 
                 await push(
                     'hashedpad',
                     'setconfig',
                     'hashedpad@active',
-                    [
-                        'hashedlaunch',
-                        'hashedlaunch',
-                        '8,TUOS',
-                        'platformfee',
-                        100,
-                        50,
-                        '1000.00000000 TUOS',
-                        '200.00000000 TUOS',
-                    ],
-                    'meme launchpad configuration failed',
+                    ['hashedlaunch', 'hashedlaunch', '8,TUOS', 'platformfee', 250],
+                    'meme launchpad config failed',
                 );
             },
 
-            'creates a fixed-supply meme token and local payment token': async () => {
+            'creates meme token and local test UOS': async () => {
                 await push(
                     'hashedlaunch',
                     'launch',
                     'hashcreator@active',
                     [
                         'hashcreator',
-                        '1000000.00000000 MEME',
-                        '1000000.00000000 MEME',
-                        'Ultra Meme',
-                        'ipfs://ultra-meme-token',
+                        '1000000.00000000 HASH',
+                        '500000.00000000 HASH',
+                        'Hashed Meme',
+                        'ipfs://hashed-meme',
                     ],
-                );
-
-                await push(
-                    'hashedlaunch',
-                    'lockmint',
-                    'hashcreator@active',
-                    ['hashcreator', 'MEME'],
                 );
 
                 await push(
@@ -146,190 +121,149 @@ module.exports = class test {
                     'hashedlaunch',
                     'transfer',
                     'hashcreator@active',
-                    ['hashcreator', 'buyerone', '1000.00000000 TUOS', 'meme test funds'],
+                    ['hashcreator', 'buyerone', '2000.00000000 TUOS', 'test funds'],
                 );
 
                 await push(
                     'hashedlaunch',
                     'transfer',
                     'hashcreator@active',
-                    ['hashcreator', 'buyertwo', '1000.00000000 TUOS', 'meme test funds'],
+                    ['hashcreator', 'buyertwo', '3000.00000000 TUOS', 'test funds'],
                 );
 
-                const stats = await common.getTable('hashedlaunch', 'MEME', 'stat');
-                assert(Boolean(stats.rows[0].mint_locked), 'MEME supply is not mint locked');
-                assert(
-                    stats.rows[0].supply === '1000000.00000000 MEME',
-                    'MEME full supply was not issued',
-                );
+                assert(amount(await balance('buyerone', 'TUOS')) === 2000, 'buyer one TUOS missing');
+                assert(amount(await balance('buyertwo', 'TUOS')) === 3000, 'buyer two TUOS missing');
             },
 
-            'creates a meme launch from the locked Hashed token': async () => {
+            'creates and activates a meme bonding-curve market': async () => {
                 await push(
                     'hashedpad',
-                    'creatememe',
+                    'createmarket',
                     'hashcreator@active',
                     [
                         'hashcreator',
-                        '8,MEME',
-                        'Ultra Meme',
-                        'https://example.com/meme.png',
-                        'A meme token launched natively on Ultra.',
-                        'https://example.com',
-                        'https://x.com/example',
-                        'https://t.me/example',
+                        '8,HASH',
+                        '100000.00000000 HASH',
+                        '0.01000000 TUOS',
+                        '0.05000000 TUOS',
+                        '500.00000000 TUOS',
+                        'Hashed Meme',
+                        'ipfs://hashed-image',
+                        'A meme launched natively on Ultra.',
+                        'https://hashed.example',
+                        'https://x.com/hashed',
+                        'https://t.me/hashed',
                     ],
+                    'market creation failed',
                 );
 
-                const launches = await common.getTable('hashedpad', 'hashedpad', 'launches');
-                assert(launches.rows.length === 1, 'meme launch was not created');
+                let markets = await common.getTable('hashedpad', 'hashedpad', 'markets');
+                assert(markets.rows.length === 1, 'market was not created');
+                assert(markets.rows[0].status === 0, 'market should begin in draft');
+                assert(markets.rows[0].token_symbol === '8,HASH', 'market token symbol mismatch');
 
-                const launch = launches.rows[0];
-                assert(launch.id === 1, 'unexpected meme launch id');
-                assert(launch.status === 0, 'new meme launch should be a draft');
-                assert(
-                    launch.token_allocation === '1000000.00000000 MEME',
-                    'launch did not capture the fixed token supply',
-                );
-                assert(launch.token_name === 'Ultra Meme', 'meme metadata was not stored');
-            },
-
-            'escrows the entire token supply and automatically goes live': async () => {
                 await push(
                     'hashedlaunch',
                     'transfer',
                     'hashcreator@active',
-                    ['hashcreator', 'hashedpad', '1000000.00000000 MEME', 'deposit:1'],
+                    ['hashcreator', 'hashedpad', '100000.00000000 HASH', 'seed:1'],
+                    'market seed failed',
                 );
 
-                const launches = await common.getTable('hashedpad', 'hashedpad', 'launches');
-                const launch = launches.rows[0];
+                await push('hashedpad', 'activate', 'hashcreator@active', [1]);
 
-                assert(launch.status === 1, 'meme launch did not go live after escrow');
-                assert(
-                    launch.token_reserve === '1000000.00000000 MEME',
-                    'bonding curve token reserve mismatch',
-                );
-                assert(
-                    (await balanceString('hashcreator', 'MEME')) === null,
-                    'creator should not retain meme supply after escrow',
-                );
+                markets = await common.getTable('hashedpad', 'hashedpad', 'markets');
+                assert(markets.rows[0].status === 1, 'market did not go live');
+                assert(markets.rows[0].deposited === '100000.00000000 HASH', 'seed balance mismatch');
             },
 
-            'buys MEME with the bonding curve and pays protocol and creator fees': async () => {
+            'buys meme token with bonding-curve pricing': async () => {
+                const before = amount(await balance('buyerone', 'HASH'));
+
                 await push(
                     'hashedlaunch',
                     'transfer',
                     'buyerone@active',
                     ['buyerone', 'hashedpad', '100.00000000 TUOS', 'buy:1'],
+                    'bonding-curve buy failed',
                 );
 
-                const launches = await common.getTable('hashedpad', 'hashedpad', 'launches');
-                const launch = launches.rows[0];
+                const after = amount(await balance('buyerone', 'HASH'));
+                assert(after > before, 'buyer did not receive HASH');
 
-                assert(
-                    launch.payment_reserve === '98.50000000 TUOS',
-                    'net bonding curve reserve should exclude 1.5% fees',
-                );
-                assert(
-                    Number(launch.token_reserve.split(' ')[0]) < 1000000,
-                    'bonding curve did not release MEME',
-                );
+                const markets = await common.getTable('hashedpad', 'hashedpad', 'markets');
+                const market = markets.rows[0];
 
-                const buyerTokens = await balanceAmount('buyerone', 'MEME');
-                assert(buyerTokens > 0, 'buyer one did not receive MEME');
-
-                assert(
-                    (await balanceString('platformfee', 'TUOS')) === '1.00000000 TUOS',
-                    'protocol fee was not paid',
-                );
-
-                const creatorPayment = await balanceAmount('hashcreator', 'TUOS');
-                assert(creatorPayment > 98000, 'creator trading fee was not paid');
+                assert(market.status === 1, 'market graduated too early');
+                assert(amount(market.sold) > 0, 'curve sold amount did not increase');
+                assert(amount(market.reserve) > 0, 'curve reserve did not increase');
+                assert(amount(await balance('platformfee', 'TUOS')) > 0, 'protocol buy fee was not paid');
             },
 
-            'second buy crosses the graduation target while curve trading remains available': async () => {
-                await push(
-                    'hashedlaunch',
-                    'transfer',
-                    'buyertwo@active',
-                    ['buyertwo', 'hashedpad', '150.00000000 TUOS', 'buy:1'],
-                );
-
-                const launches = await common.getTable('hashedpad', 'hashedpad', 'launches');
-                const launch = launches.rows[0];
-
-                assert(Boolean(launch.graduated), 'meme launch did not reach graduation');
-                assert(
-                    Number(launch.payment_reserve.split(' ')[0]) >= 200,
-                    'graduation reserve target was not reached',
-                );
-                assert(launch.trade_count === 2, 'unexpected trade count after two buys');
-            },
-
-            'sells MEME back into the bonding curve for TUOS': async () => {
-                const before = await balanceAmount('buyerone', 'TUOS');
+            'sells meme token back into the curve': async () => {
+                const uosBefore = amount(await balance('buyerone', 'TUOS'));
 
                 await push(
                     'hashedlaunch',
                     'transfer',
                     'buyerone@active',
-                    ['buyerone', 'hashedpad', '10000.00000000 MEME', 'sell:1'],
+                    ['buyerone', 'hashedpad', '1000.00000000 HASH', 'sell:1'],
+                    'bonding-curve sell failed',
                 );
 
-                const after = await balanceAmount('buyerone', 'TUOS');
-                assert(after > before, 'seller did not receive TUOS from the bonding curve');
+                const uosAfter = amount(await balance('buyerone', 'TUOS'));
+                assert(uosAfter > uosBefore, 'seller did not receive TUOS');
 
-                const launches = await common.getTable('hashedpad', 'hashedpad', 'launches');
-                const launch = launches.rows[0];
-
-                assert(launch.trade_count === 3, 'sell trade was not counted');
-                assert(Boolean(launch.graduated), 'graduation flag should be permanent');
-
-                const trades = await common.getTable('hashedpad', '1', 'trades');
-                assert(trades.rows.length === 3, 'recent trade history was not recorded');
-                assert(!Boolean(trades.rows[2].is_buy), 'third trade should be a sell');
+                const markets = await common.getTable('hashedpad', 'hashedpad', 'markets');
+                assert(markets.rows[0].status === 1, 'market should still be live after ordinary sell');
             },
 
-            'blocks new minting after the meme token has launched': async () => {
+            'graduates market when curve reserve reaches target': async () => {
+                await push(
+                    'hashedlaunch',
+                    'transfer',
+                    'buyertwo@active',
+                    ['buyertwo', 'hashedpad', '700.00000000 TUOS', 'buy:1'],
+                    'graduation buy failed',
+                );
+
+                const markets = await common.getTable('hashedpad', 'hashedpad', 'markets');
+                const market = markets.rows[0];
+
+                assert(market.status === 2, 'market did not graduate');
+                assert(market.graduated_at > 0, 'graduation timestamp was not written');
+                assert(amount(market.reserve) >= 500, 'graduation reserve target was not reached');
+                assert(amount(await balance('buyertwo', 'HASH')) > 0, 'buyer two did not receive HASH');
+            },
+
+            'blocks curve trading after graduation and lets creator settle': async () => {
                 await common.transactAssert(
                     [
                         {
                             account: 'hashedlaunch',
-                            name: 'issue',
-                            authorization: [{ actor: 'hashcreator', permission: 'active' }],
+                            name: 'transfer',
+                            authorization: [{ actor: 'buyerone', permission: 'active' }],
                             data: {
-                                to: 'hashcreator',
-                                quantity: '1.00000000 MEME',
-                                memo: 'attempt to inflate fixed supply',
+                                from: 'buyerone',
+                                to: 'hashedpad',
+                                quantity: '10.00000000 TUOS',
+                                memo: 'buy:1',
                             },
                         },
                     ],
-                    'minting is permanently locked for this token',
+                    'market is not live',
                 );
-            },
 
-            'prevents duplicate meme launches for the same token': async () => {
-                await common.transactAssert(
-                    [
-                        {
-                            account: 'hashedpad',
-                            name: 'creatememe',
-                            authorization: [{ actor: 'hashcreator', permission: 'active' }],
-                            data: {
-                                creator: 'hashcreator',
-                                sale_symbol: '8,MEME',
-                                token_name: 'Ultra Meme Again',
-                                image_uri: 'https://example.com/meme2.png',
-                                description: 'duplicate launch',
-                                website: '',
-                                x_url: '',
-                                telegram_url: '',
-                            },
-                        },
-                    ],
-                    'this token already has a meme launch',
-                );
+                const creatorUosBefore = amount(await balance('hashcreator', 'TUOS'));
+
+                await push('hashedpad', 'settle', 'hashcreator@active', [1], 'market settlement failed');
+
+                const markets = await common.getTable('hashedpad', 'hashedpad', 'markets');
+                assert(markets.rows[0].status === 3, 'market was not closed after settlement');
+                assert(markets.rows[0].reserve === '0.00000000 TUOS', 'reserve was not settled');
+
+                const creatorUosAfter = amount(await balance('hashcreator', 'TUOS'));
+                assert(creatorUosAfter > creatorUosBefore, 'creator did not receive graduated market reserve');
             },
         };
     }
