@@ -1,0 +1,42 @@
+name: Hashed CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ultra-contract:
+    name: Ultra contract integration
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/ultra.io/3rdparty-devtools:latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compile and test on Ultra local chain
+        run: bash scripts/test_ultra.sh
+
+  web:
+    name: Web launcher build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        run: npm install
+
+      - name: Build
+        run: npm run build
