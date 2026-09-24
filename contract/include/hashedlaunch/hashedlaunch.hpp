@@ -4,13 +4,9 @@
 #include <eosio/eosio.hpp>
 #include <string>
 
-using eosio::asset;
-using eosio::check;
-using eosio::contract;
-using eosio::name;
-using eosio::same_payer;
-using eosio::symbol;
-using eosio::symbol_code;
+// EOSIO's _n literal and action helpers live in the eosio namespace.
+// Ultra's reference eosio.token contract is also declared inside eosio.
+using namespace eosio;
 using std::string;
 
 class [[eosio::contract("hashedlaunch")]] hashedlaunch : public contract {
