@@ -113,7 +113,7 @@ public:
 
     // Read-only mirror of Hashed Token Launcher's stat row.
     // Meme launches require max supply to be issued and minting to be locked.
-    struct launcher_stat {
+    struct [[eosio::table]] launcher_stat {
         asset supply;
         asset max_supply;
         name issuer;
