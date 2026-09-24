@@ -22,7 +22,11 @@ public:
     static constexpr uint8_t STATUS_CANCELLED = 4;
 
     [[eosio::action]]
-    void setconfig(name fee_receiver, uint16_t fee_bps);
+    void setconfig(name launcher_contract,
+                   name payment_contract,
+                   symbol payment_symbol,
+                   name fee_receiver,
+                   uint16_t fee_bps);
 
     [[eosio::action]]
     void createcamp(name creator,
@@ -121,6 +125,9 @@ public:
     };
 
     struct [[eosio::table("config")]] config_row {
+        name launcher_contract;
+        name payment_contract;
+        symbol payment_symbol;
         name fee_receiver;
         uint16_t fee_bps = 0;
     };
