@@ -15,8 +15,9 @@
     .target span{color:#666}.target strong{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
     label{display:block;margin:14px 0;color:#ccc;font-size:13px;font-weight:600}
     input[type=file]{display:block;width:100%;margin-top:8px;padding:13px;background:#080808;border:1px solid #292929;border-radius:12px;color:#888}
-    .actions{display:flex;gap:10px;margin-top:24px}.button{border-radius:999px;border:1px solid #303030;padding:13px 20px;font-weight:700;cursor:pointer}
-    #connect{background:#101010;color:#f5f5f5}#deploy{background:#f5f5f5;color:#050505;flex:1}button:disabled{opacity:.45;cursor:not-allowed}
+    .actions{display:flex;gap:10px;margin-top:24px;flex-wrap:wrap}.button{border-radius:999px;border:1px solid #303030;padding:13px 20px;font-weight:700;cursor:pointer}
+    #connect{background:#101010;color:#f5f5f5}#deploy{background:#171717;color:#f5f5f5;flex:1}#finish{background:#f5f5f5;color:#050505;flex:1}
+    button:disabled{opacity:.45;cursor:not-allowed}
     .status{margin-top:18px;padding-top:18px;border-top:1px solid #222;font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;color:#888;word-break:break-word;min-height:38px}
     .status.ok{color:#7ee2a0}.status.error{color:#ff9292}.warning{font-size:12px;color:#666;margin-top:22px}
   </style>
@@ -32,9 +33,10 @@
     <div class="actions">
       <button id="connect" class="button" type="button">Connect Wallet</button>
       <button id="deploy" class="button" type="button" disabled>Deploy Hashed40</button>
+      <button id="finish" class="button" type="button" disabled>Finish setup</button>
     </div>
     <div id="status" class="status">Connect the Ultra Testnet account that controls 1aa2aa3aa4wp.</div>
-    <div class="warning">Only deploy the GitHub CI artifact for Hashed40. This helper is Testnet-only and locked to 1aa2aa3aa4wp.</div>
+    <div class="warning">Finish setup adds 1aa2aa3aa4wp@eosio.code to active permission, configures HashTL 1aa2aa3aa4wo as the token factory, sets UOS as the payment asset, and verifies the result on-chain.</div>
   </main>
   <script type="module" src="/src/deploy.ts"></script>
 </body>
