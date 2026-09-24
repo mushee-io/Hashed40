@@ -10,6 +10,16 @@ const PAYMENT_CONTRACT = import.meta.env.VITE_PAYMENT_CONTRACT || 'eosio.token';
 const PAYMENT_SYMBOL = import.meta.env.VITE_PAYMENT_SYMBOL || 'UOS';
 const PAYMENT_DECIMALS = Number(import.meta.env.VITE_PAYMENT_DECIMALS || 8);
 const RPC_URL = import.meta.env.VITE_ULTRA_RPC_URL || 'https://ultra-testnet.eosphere.io';
+const RPC_URLS = Array.from(
+  new Set([
+    RPC_URL,
+    'https://ultra-testnet.eosphere.io',
+    'https://testnet.ultra.eosrio.io',
+    'https://test.ultra.eosusa.io',
+    'https://api.ultra-testnet.cryptolions.io',
+    'https://api.testnet.ultra.eossweden.org',
+  ]),
+);
 
 const ULTRA_MAINNET_CHAIN_ID =
   'a9c481dfbc7d9506dc7e87e9a137c931b0a9303f64fd7a1d08b8230133920097';
@@ -399,21 +409,36 @@ async function sign(contract: string, action: string, data: Record<string, unkno
 }
 
 async function fetchMarkets(): Promise<MarketRow[]> {
-  const response = await fetch(`${RPC_URL}/v1/chain/get_table_rows`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      json: true,
-      code: PAD_CONTRACT,
-      scope: PAD_CONTRACT,
-      table: 'markets',
-      limit: 250,
-    }),
-  });
+  let lastError: unknown;
 
-  if (!response.ok) throw new Error(`Ultra RPC returned ${response.status}.`);
-  const payload = (await response.json()) as { rows?: MarketRow[] };
-  return payload.rows ?? [];
+  for (const rpcUrl of RPC_URLS) {
+    try {
+      const response = await fetch(`${rpcUrl}/v1/chain/get_table_rows`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          json: true,
+          code: PAD_CONTRACT,
+          scope: PAD_CONTRACT,
+          table: 'markets',
+          limit: 250,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Ultra RPC returned ${response.status}.`);
+      }
+
+      const payload = (await response.json()) as { rows?: MarketRow[] };
+      return payload.rows ?? [];
+    } catch (err: unknown) {
+      lastError = err;
+    }
+  }
+
+  throw new Error(
+    `Could not reach the Hashed40 market table through any Ultra Testnet RPC. ${errorMessage(lastError)}`,
+  );
 }
 
 async function waitForMarket(creator: string, symbol: string): Promise<MarketRow> {
@@ -606,16 +631,16 @@ connectButton.addEventListener('click', async () => {
 
     const chain = await wallet.getChainId();
 
+    if (!chain.data) {
+      throw new Error('Ultra Wallet could not reach its current network. Unlock it, select Testnet, then try again.');
+    }
+
     if (chain.data !== ULTRA_TESTNET_CHAIN_ID) {
       if (chain.data === ULTRA_MAINNET_CHAIN_ID) {
-        connectButton.textContent = 'Switching to Testnet…';
+        throw new Error('Ultra Wallet is on Mainnet. Switch to Testnet, then connect again.');
       }
 
-      try {
-        await wallet.switchNetwork(ULTRA_TESTNET_CHAIN_ID);
-      } catch {
-        throw new Error('Open Ultra Wallet → Networks → Testnet, switch to Testnet, then connect again.');
-      }
+      throw new Error('Ultra Wallet is not on Ultra Testnet. Switch the extension to Testnet, then connect again.');
     }
 
     const { data } = await wallet.connect();
