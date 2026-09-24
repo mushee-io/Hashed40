@@ -17,17 +17,17 @@ void hashedlaunch::create_token(name issuer,
     auto existing = statstable.find(sym.code().raw());
     check(existing == statstable.end(), "token symbol already exists on this launcher");
 
-    // Creator pays RAM for token state. Public production deployments may replace
-    // this with protocol-sponsored RAM plus a launch fee.
     statstable.emplace(issuer, [&](auto& s) {
         s.supply = asset{0, sym};
         s.max_supply = maximum_supply;
         s.issuer = issuer;
+        s.mint_locked = false;
     });
 
     metadata metatable(get_self(), get_self().value);
     auto meta_existing = metatable.find(sym.code().raw());
     check(meta_existing == metatable.end(), "metadata already exists for symbol");
+
     metatable.emplace(issuer, [&](auto& m) {
         m.symcode = sym.code();
         m.creator = issuer;
@@ -71,6 +71,7 @@ void hashedlaunch::issue_internal(name to, const asset& quantity) {
     check(existing != statstable.end(), "token does not exist");
     const auto& st = *existing;
 
+    check(!st.mint_locked, "minting is permanently locked for this token");
     check(to == st.issuer, "new supply can only be issued to the issuer");
     check(quantity.is_valid(), "invalid quantity");
     check(quantity.amount > 0, "must issue a positive quantity");
@@ -78,7 +79,10 @@ void hashedlaunch::issue_internal(name to, const asset& quantity) {
     check(quantity.amount <= st.max_supply.amount - st.supply.amount,
           "quantity exceeds available supply");
 
-    statstable.modify(st, same_payer, [&](auto& s) { s.supply += quantity; });
+    statstable.modify(st, same_payer, [&](auto& s) {
+        s.supply += quantity;
+    });
+
     add_balance(st.issuer, quantity, st.issuer);
 }
 
@@ -88,9 +92,23 @@ void hashedlaunch::issue(name to, asset quantity, string memo) {
     stats statstable(get_self(), quantity.symbol.code().raw());
     auto existing = statstable.find(quantity.symbol.code().raw());
     check(existing != statstable.end(), "token does not exist");
-    require_auth(existing->issuer);
 
+    require_auth(existing->issuer);
     issue_internal(to, quantity);
+}
+
+void hashedlaunch::lockmint(name issuer, symbol_code symcode) {
+    require_auth(issuer);
+
+    stats statstable(get_self(), symcode.raw());
+    auto existing = statstable.find(symcode.raw());
+    check(existing != statstable.end(), "token does not exist");
+    check(existing->issuer == issuer, "only the token issuer may lock minting");
+    check(!existing->mint_locked, "minting is already locked");
+
+    statstable.modify(existing, same_payer, [&](auto& s) {
+        s.mint_locked = true;
+    });
 }
 
 void hashedlaunch::retire(asset quantity, string memo) {
@@ -106,7 +124,10 @@ void hashedlaunch::retire(asset quantity, string memo) {
     require_auth(st.issuer);
     check(quantity.symbol == st.supply.symbol, "symbol precision mismatch");
 
-    statstable.modify(st, same_payer, [&](auto& s) { s.supply -= quantity; });
+    statstable.modify(st, same_payer, [&](auto& s) {
+        s.supply -= quantity;
+    });
+
     sub_balance(st.issuer, quantity);
 }
 
@@ -126,9 +147,6 @@ void hashedlaunch::transfer(name from, name to, asset quantity, string memo) {
     require_recipient(to);
 
     sub_balance(from, quantity);
-
-    // The sender sponsors RAM for a new receiver balance row. This keeps the MVP
-    // one-click transferable while preserving the existing payer on later updates.
     add_balance(to, quantity, from);
 }
 
@@ -140,7 +158,9 @@ void hashedlaunch::sub_balance(name owner, const asset& value) {
     if (from.balance.amount == value.amount) {
         from_acnts.erase(from);
     } else {
-        from_acnts.modify(from, same_payer, [&](auto& a) { a.balance -= value; });
+        from_acnts.modify(from, same_payer, [&](auto& a) {
+            a.balance -= value;
+        });
     }
 }
 
@@ -149,9 +169,13 @@ void hashedlaunch::add_balance(name owner, const asset& value, name ram_payer) {
     auto to = to_acnts.find(value.symbol.code().raw());
 
     if (to == to_acnts.end()) {
-        to_acnts.emplace(ram_payer, [&](auto& a) { a.balance = value; });
+        to_acnts.emplace(ram_payer, [&](auto& a) {
+            a.balance = value;
+        });
     } else {
-        to_acnts.modify(to, same_payer, [&](auto& a) { a.balance += value; });
+        to_acnts.modify(to, same_payer, [&](auto& a) {
+            a.balance += value;
+        });
     }
 }
 
@@ -167,16 +191,20 @@ void hashedlaunch::open(name owner, const symbol& sym, name ram_payer) {
     auto it = acnts.find(sym.code().raw());
 
     if (it == acnts.end()) {
-        acnts.emplace(ram_payer, [&](auto& a) { a.balance = asset{0, sym}; });
+        acnts.emplace(ram_payer, [&](auto& a) {
+            a.balance = asset{0, sym};
+        });
     }
 }
 
 void hashedlaunch::close(name owner, const symbol& sym) {
     require_auth(owner);
+
     accounts acnts(get_self(), owner.value);
     auto it = acnts.find(sym.code().raw());
     check(it != acnts.end(), "balance row already closed or never opened");
     check(it->balance.amount == 0, "cannot close because balance is not zero");
+
     acnts.erase(it);
 }
 
@@ -197,6 +225,7 @@ void hashedlaunch::setmeta(name issuer,
     metadata metatable(get_self(), get_self().value);
     auto meta = metatable.find(symcode.raw());
     check(meta != metatable.end(), "metadata does not exist");
+
     metatable.modify(meta, same_payer, [&](auto& m) {
         m.token_name = token_name;
         m.metadata_uri = metadata_uri;
