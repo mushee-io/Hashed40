@@ -193,7 +193,7 @@ async function ensureCodePermission() {
     {
       contract: 'eosio',
       action: 'updateauth',
-      authorization: [{ actor: TARGET, permission: 'active' }],
+      authorization: [{ actor: TARGET, permission: 'owner' }],
       data: {
         account: TARGET,
         permission: 'active',
