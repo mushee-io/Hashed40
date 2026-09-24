@@ -478,7 +478,9 @@ void hashedpad::handle_purchase(name token_contract,
     );
 
     if (contribution == contribs.end()) {
-        contribs.emplace(from, [&](auto& row) {
+        // Notification handlers cannot bill the transfer sender for RAM on
+        // Antelope/Ultra. The launchpad sponsors the participant row instead.
+        contribs.emplace(get_self(), [&](auto& row) {
             row.account = from;
             row.paid = quantity;
             row.claimable = sale_amount;
