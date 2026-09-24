@@ -128,7 +128,7 @@ module.exports = class test {
                 assert(result, 'lockmint transaction failed');
 
                 const stats = await common.getTable('hashedlaunch', 'HASH', 'stat');
-                assert(stats.rows[0].mint_locked === true, 'HASH minting was not locked');
+                assert(Boolean(stats.rows[0].mint_locked), 'HASH minting was not locked');
 
                 await common.transactAssert(
                     [
