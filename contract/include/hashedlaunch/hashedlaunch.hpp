@@ -4,8 +4,6 @@
 #include <eosio/eosio.hpp>
 #include <string>
 
-// EOSIO's _n literal and action helpers live in the eosio namespace.
-// Ultra's reference eosio.token contract is also declared inside eosio.
 using namespace eosio;
 using std::string;
 
@@ -19,8 +17,6 @@ public:
                 string token_name,
                 string metadata_uri);
 
-    // One-click launcher: creates the token and optionally issues an initial supply
-    // to the issuer in a single action.
     [[eosio::action]]
     void launch(name issuer,
                 asset maximum_supply,
@@ -30,6 +26,9 @@ public:
 
     [[eosio::action]]
     void issue(name to, asset quantity, string memo);
+
+    [[eosio::action]]
+    void lockmint(name issuer, symbol_code symcode);
 
     [[eosio::action]]
     void retire(asset quantity, string memo);
@@ -58,6 +57,8 @@ public:
         asset supply;
         asset max_supply;
         name issuer;
+        bool mint_locked = false;
+
         uint64_t primary_key() const { return supply.symbol.code().raw(); }
     };
 
@@ -66,6 +67,7 @@ public:
         name creator;
         string token_name;
         string metadata_uri;
+
         uint64_t primary_key() const { return symcode.raw(); }
     };
 
