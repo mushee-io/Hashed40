@@ -236,7 +236,7 @@ module.exports = class test {
                 assert(amount(await balance('buyertwo', 'HASH')) > 0, 'buyer two did not receive HASH');
             },
 
-            'blocks curve trading after graduation and lets creator settle': async () => {
+            'blocks curve trading after graduation and keeps reserve locked': async () => {
                 await common.transactAssert(
                     [
                         {
@@ -254,16 +254,9 @@ module.exports = class test {
                     'market is not live',
                 );
 
-                const creatorUosBefore = amount(await balance('hashcreator', 'TUOS'));
-
-                await push('hashedpad', 'settle', 'hashcreator@active', [1], 'market settlement failed');
-
                 const markets = await common.getTable('hashedpad', 'hashedpad', 'markets');
-                assert(markets.rows[0].status === 3, 'market was not closed after settlement');
-                assert(markets.rows[0].reserve === '0.00000000 TUOS', 'reserve was not settled');
-
-                const creatorUosAfter = amount(await balance('hashcreator', 'TUOS'));
-                assert(creatorUosAfter > creatorUosBefore, 'creator did not receive graduated market reserve');
+                assert(markets.rows[0].status === 2, 'market should remain graduated');
+                assert(amount(markets.rows[0].reserve) >= 500, 'graduated reserve should remain locked');
             },
         };
     }
