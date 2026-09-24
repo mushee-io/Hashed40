@@ -7,68 +7,88 @@ uint32_t hashedpad::now_seconds() {
     return time_point_sec(current_time_point()).sec_since_epoch();
 }
 
-int64_t hashedpad::pow10(uint8_t precision) {
-    check(precision <= 18, "unsupported asset precision");
+int64_t hashedpad::ceil_div_128(__int128 numerator, int64_t denominator) {
+    check(numerator > 0, "curve numerator must be positive");
+    check(denominator > 0, "curve denominator must be positive");
 
-    int64_t value = 1;
-    for (uint8_t i = 0; i < precision; ++i) {
-        check(value <= std::numeric_limits<int64_t>::max() / 10, "precision overflow");
-        value *= 10;
-    }
+    const __int128 result =
+        (numerator + static_cast<__int128>(denominator) - 1) /
+        static_cast<__int128>(denominator);
 
-    return value;
+    check(result > 0, "curve result must be positive");
+    check(result <= std::numeric_limits<int64_t>::max(), "curve arithmetic overflow");
+
+    return static_cast<int64_t>(result);
 }
 
-asset hashedpad::calculate_sale_amount(const asset& payment,
-                                       const asset& rate,
-                                       uint8_t payment_precision) {
-    check(payment.amount > 0, "payment must be positive");
-    check(rate.amount > 0, "token rate must be positive");
-
-    const int64_t scale = pow10(payment_precision);
-    const __int128 numerator =
-        static_cast<__int128>(payment.amount) * static_cast<__int128>(rate.amount);
-    const __int128 result = numerator / scale;
-
-    check(result > 0, "contribution is too small for the configured token rate");
-    check(result <= std::numeric_limits<int64_t>::max(), "sale amount overflow");
-
-    return asset{static_cast<int64_t>(result), rate.symbol};
-}
-
-uint64_t hashedpad::parse_campaign_id(const string& memo, const string& prefix) {
-    check(memo.rfind(prefix, 0) == 0, "invalid launchpad memo");
-    check(memo.size() > prefix.size(), "campaign id is missing from memo");
+uint64_t hashedpad::parse_launch_id(const string& memo, const string& prefix) {
+    check(memo.rfind(prefix, 0) == 0, "invalid meme launch memo");
+    check(memo.size() > prefix.size(), "launch id is missing from memo");
 
     uint64_t id = 0;
+
     for (size_t i = prefix.size(); i < memo.size(); ++i) {
         const char c = memo[i];
-        check(c >= '0' && c <= '9', "campaign id must contain digits only");
+        check(c >= '0' && c <= '9', "launch id must contain digits only");
 
         const uint64_t digit = static_cast<uint64_t>(c - '0');
         check(
             id <= (std::numeric_limits<uint64_t>::max() - digit) / 10,
-            "campaign id overflow"
+            "launch id overflow"
         );
+
         id = id * 10 + digit;
     }
 
-    check(id > 0, "campaign id must be greater than zero");
+    check(id > 0, "launch id must be greater than zero");
     return id;
+}
+
+void hashedpad::validate_metadata(const string& token_name,
+                                  const string& image_uri,
+                                  const string& description,
+                                  const string& website,
+                                  const string& x_url,
+                                  const string& telegram_url) {
+    check(!token_name.empty() && token_name.size() <= 64,
+          "token name must be between 1 and 64 bytes");
+    check(!image_uri.empty() && image_uri.size() <= 256,
+          "image URI must be between 1 and 256 bytes");
+    check(description.size() <= 512, "description is too long");
+    check(website.size() <= 256, "website URL is too long");
+    check(x_url.size() <= 256, "X URL is too long");
+    check(telegram_url.size() <= 256, "Telegram URL is too long");
 }
 
 void hashedpad::setconfig(name launcher_contract,
                           name payment_contract,
                           symbol payment_symbol,
                           name fee_receiver,
-                          uint16_t fee_bps) {
+                          uint16_t protocol_fee_bps,
+                          uint16_t creator_fee_bps,
+                          asset virtual_payment,
+                          asset graduation_target) {
     require_auth(get_self());
 
     check(is_account(launcher_contract), "token launcher contract does not exist");
     check(is_account(payment_contract), "payment token contract does not exist");
-    check(payment_symbol.is_valid(), "invalid configured payment symbol");
-    check(fee_bps <= 1000, "platform fee cannot exceed 10%");
-    check(fee_bps == 0 || is_account(fee_receiver), "fee receiver account does not exist");
+    check(is_account(fee_receiver), "fee receiver account does not exist");
+    check(payment_symbol.is_valid(), "invalid payment symbol");
+
+    check(protocol_fee_bps <= 500, "protocol fee cannot exceed 5%");
+    check(creator_fee_bps <= 500, "creator fee cannot exceed 5%");
+    check(
+        static_cast<uint32_t>(protocol_fee_bps) + static_cast<uint32_t>(creator_fee_bps) <= 500,
+        "combined trading fee cannot exceed 5%"
+    );
+
+    check(virtual_payment.is_valid(), "invalid virtual payment reserve");
+    check(virtual_payment.symbol == payment_symbol, "virtual reserve symbol mismatch");
+    check(virtual_payment.amount > 0, "virtual payment reserve must be positive");
+
+    check(graduation_target.is_valid(), "invalid graduation target");
+    check(graduation_target.symbol == payment_symbol, "graduation target symbol mismatch");
+    check(graduation_target.amount > 0, "graduation target must be positive");
 
     config_singleton config(get_self(), get_self().value);
     config.set(
@@ -77,201 +97,120 @@ void hashedpad::setconfig(name launcher_contract,
             payment_contract,
             payment_symbol,
             fee_receiver,
-            fee_bps
+            protocol_fee_bps,
+            creator_fee_bps,
+            virtual_payment,
+            graduation_target
         },
         get_self()
     );
 }
 
-void hashedpad::createcamp(name creator,
-                           name sale_contract,
-                           asset token_allocation,
-                           name payment_contract,
-                           symbol payment_symbol,
-                           asset tokens_per_payment,
-                           uint32_t start_at,
-                           uint32_t end_at,
-                           asset soft_cap,
-                           asset hard_cap,
-                           asset min_contribution,
-                           asset max_contribution,
-                           bool allowlist_enabled) {
+void hashedpad::creatememe(name creator,
+                           symbol sale_symbol,
+                           string token_name,
+                           string image_uri,
+                           string description,
+                           string website,
+                           string x_url,
+                           string telegram_url) {
     require_auth(creator);
 
     check(is_account(creator), "creator account does not exist");
-    check(is_account(sale_contract), "sale token contract does not exist");
-    check(is_account(payment_contract), "payment token contract does not exist");
-
-    check(token_allocation.is_valid(), "invalid token allocation");
-    check(token_allocation.amount > 0, "token allocation must be positive");
-    check(tokens_per_payment.is_valid(), "invalid token rate");
-    check(tokens_per_payment.amount > 0, "tokens per payment must be positive");
-    check(
-        tokens_per_payment.symbol == token_allocation.symbol,
-        "token rate must use the sale token symbol and precision"
+    check(sale_symbol.is_valid(), "invalid sale token symbol");
+    validate_metadata(
+        token_name,
+        image_uri,
+        description,
+        website,
+        x_url,
+        telegram_url
     );
 
-    check(payment_symbol.is_valid(), "invalid payment symbol");
+    config_singleton config(get_self(), get_self().value);
+    check(config.exists(), "meme launchpad is not configured");
+    const auto cfg = config.get();
 
-    check(soft_cap.is_valid(), "invalid soft cap");
-    check(hard_cap.is_valid(), "invalid hard cap");
-    check(min_contribution.is_valid(), "invalid minimum contribution");
-    check(max_contribution.is_valid(), "invalid maximum contribution");
+    launcher_stats statstable(
+        cfg.launcher_contract,
+        sale_symbol.code().raw()
+    );
 
-    check(soft_cap.symbol == payment_symbol, "soft cap payment symbol mismatch");
-    check(hard_cap.symbol == payment_symbol, "hard cap payment symbol mismatch");
-    check(min_contribution.symbol == payment_symbol, "minimum contribution symbol mismatch");
-    check(max_contribution.symbol == payment_symbol, "maximum contribution symbol mismatch");
-
-    check(soft_cap.amount >= 0, "soft cap cannot be negative");
-    check(hard_cap.amount > 0, "hard cap must be positive");
-    check(soft_cap.amount <= hard_cap.amount, "soft cap cannot exceed hard cap");
-    check(min_contribution.amount > 0, "minimum contribution must be positive");
-    check(max_contribution.amount >= min_contribution.amount, "maximum contribution is below minimum");
-    check(max_contribution.amount <= hard_cap.amount, "maximum contribution cannot exceed hard cap");
-
-    check(end_at > now_seconds(), "campaign end time must be in the future");
-    check(end_at > start_at, "campaign end time must be after start time");
-
-    const asset tokens_at_hard_cap =
-        calculate_sale_amount(hard_cap, tokens_per_payment, payment_symbol.precision());
+    auto token = statstable.find(sale_symbol.code().raw());
+    check(token != statstable.end(), "token does not exist on the Hashed launcher");
+    check(token->supply.symbol == sale_symbol, "sale token precision mismatch");
+    check(token->issuer == creator, "only the token issuer may create its meme launch");
+    check(token->mint_locked, "lock token minting before creating a meme launch");
+    check(token->supply.amount > 0, "token supply must be positive");
     check(
-        tokens_at_hard_cap.amount <= token_allocation.amount,
-        "token allocation cannot satisfy the configured hard cap and rate"
+        token->supply == token->max_supply,
+        "issue the full maximum supply before creating a meme launch"
+    );
+
+    launches table(get_self(), get_self().value);
+    auto by_symbol = table.get_index<"bysymbol"_n>();
+    check(
+        by_symbol.find(sale_symbol.code().raw()) == by_symbol.end(),
+        "this token already has a meme launch"
     );
 
     state_singleton state(get_self(), get_self().value);
     auto st = state.get_or_default();
-    check(st.next_campaign_id > 0, "campaign id overflow");
+    check(st.next_launch_id > 0, "launch id overflow");
 
-    config_singleton config(get_self(), get_self().value);
-    check(config.exists(), "launchpad is not configured");
-    const auto cfg = config.get();
-
-    check(
-        sale_contract == cfg.launcher_contract,
-        "sale token must come from the configured Hashed token launcher"
-    );
-    check(
-        payment_contract == cfg.payment_contract,
-        "unsupported campaign payment contract"
-    );
-    check(
-        payment_symbol == cfg.payment_symbol,
-        "unsupported campaign payment symbol"
-    );
-
-    campaigns table(get_self(), get_self().value);
-    const uint64_t campaign_id = st.next_campaign_id;
+    const uint64_t launch_id = st.next_launch_id;
+    const asset zero_payment{0, cfg.payment_symbol};
 
     table.emplace(creator, [&](auto& row) {
-        row.id = campaign_id;
+        row.id = launch_id;
         row.creator = creator;
 
-        row.sale_contract = sale_contract;
-        row.token_allocation = token_allocation;
-        row.deposited = asset{0, token_allocation.symbol};
-        row.sold = asset{0, token_allocation.symbol};
+        row.sale_contract = cfg.launcher_contract;
+        row.sale_symbol = sale_symbol;
+        row.token_allocation = token->supply;
+        row.token_reserve = asset{0, sale_symbol};
 
-        row.payment_contract = payment_contract;
-        row.payment_symbol = payment_symbol;
-        row.tokens_per_payment = tokens_per_payment;
-        row.raised = asset{0, payment_symbol};
-
-        row.start_at = start_at;
-        row.end_at = end_at;
-
-        row.soft_cap = soft_cap;
-        row.hard_cap = hard_cap;
-        row.min_contribution = min_contribution;
-        row.max_contribution = max_contribution;
-
-        row.allowlist_enabled = allowlist_enabled;
-        row.status = STATUS_DRAFT;
+        row.payment_contract = cfg.payment_contract;
+        row.payment_symbol = cfg.payment_symbol;
+        row.virtual_payment = cfg.virtual_payment;
+        row.payment_reserve = zero_payment;
+        row.graduation_target = cfg.graduation_target;
 
         row.fee_receiver = cfg.fee_receiver;
-        row.fee_bps = cfg.fee_bps;
+        row.protocol_fee_bps = cfg.protocol_fee_bps;
+        row.creator_fee_bps = cfg.creator_fee_bps;
 
-        row.proceeds_withdrawn = false;
-        row.sale_reclaimed = false;
+        row.graduated = false;
+        row.status = STATUS_DRAFT;
+
+        row.volume = zero_payment;
+        row.trade_count = 0;
+        row.created_at = now_seconds();
+
+        row.token_name = token_name;
+        row.image_uri = image_uri;
+        row.description = description;
+        row.website = website;
+        row.x_url = x_url;
+        row.telegram_url = telegram_url;
     });
 
-    check(st.next_campaign_id != std::numeric_limits<uint64_t>::max(), "campaign id overflow");
-    st.next_campaign_id += 1;
+    check(st.next_launch_id != std::numeric_limits<uint64_t>::max(), "launch id overflow");
+    st.next_launch_id += 1;
     state.set(st, creator);
 }
 
-void hashedpad::setallow(uint64_t campaign_id, name account, bool allowed) {
-    campaigns table(get_self(), get_self().value);
-    const auto& campaign = table.get(campaign_id, "campaign does not exist");
+void hashedpad::cancel(uint64_t launch_id) {
+    launches table(get_self(), get_self().value);
+    auto launch_it = table.find(launch_id);
+    check(launch_it != table.end(), "meme launch does not exist");
 
-    require_auth(campaign.creator);
-    check(campaign.allowlist_enabled, "campaign does not use an allowlist");
-    check(campaign.status == STATUS_DRAFT || campaign.status == STATUS_ACTIVE,
-          "campaign allowlist is locked");
-    check(is_account(account), "allowlist account does not exist");
+    require_auth(launch_it->creator);
+    check(launch_it->status == STATUS_DRAFT, "only a draft launch can be cancelled");
+    check(launch_it->token_reserve.amount == 0, "cannot cancel after token escrow");
 
-    allowlist list(get_self(), campaign_id);
-    auto existing = list.find(account.value);
-
-    if (allowed) {
-        if (existing == list.end()) {
-            list.emplace(campaign.creator, [&](auto& row) {
-                row.account = account;
-            });
-        }
-    } else if (existing != list.end()) {
-        list.erase(existing);
-    }
-}
-
-void hashedpad::activate(uint64_t campaign_id) {
-    campaigns table(get_self(), get_self().value);
-    auto campaign = table.find(campaign_id);
-    check(campaign != table.end(), "campaign does not exist");
-
-    require_auth(campaign->creator);
-    check(campaign->status == STATUS_DRAFT, "campaign is not in draft status");
-    check(campaign->deposited == campaign->token_allocation,
-          "full token allocation must be deposited before activation");
-    check(campaign->end_at > now_seconds(), "campaign has already ended");
-
-    table.modify(campaign, same_payer, [&](auto& row) {
-        row.status = STATUS_ACTIVE;
-    });
-}
-
-void hashedpad::cancel(uint64_t campaign_id) {
-    campaigns table(get_self(), get_self().value);
-    auto campaign = table.find(campaign_id);
-    check(campaign != table.end(), "campaign does not exist");
-
-    require_auth(campaign->creator);
-    check(
-        campaign->status == STATUS_DRAFT ||
-        (campaign->status == STATUS_ACTIVE && campaign->raised.amount == 0),
-        "campaign cannot be cancelled after receiving contributions"
-    );
-
-    table.modify(campaign, same_payer, [&](auto& row) {
+    table.modify(launch_it, same_payer, [&](auto& row) {
         row.status = STATUS_CANCELLED;
-    });
-}
-
-void hashedpad::finalize(uint64_t campaign_id) {
-    campaigns table(get_self(), get_self().value);
-    auto campaign = table.find(campaign_id);
-    check(campaign != table.end(), "campaign does not exist");
-    check(campaign->status == STATUS_ACTIVE, "campaign is not active");
-
-    const bool ended = now_seconds() >= campaign->end_at;
-    const bool hard_cap_reached = campaign->raised.amount >= campaign->hard_cap.amount;
-    check(ended || hard_cap_reached, "campaign is still running");
-
-    const bool successful = campaign->raised.amount >= campaign->soft_cap.amount;
-
-    table.modify(campaign, same_payer, [&](auto& row) {
-        row.status = successful ? STATUS_SUCCESS : STATUS_FAILED;
     });
 }
 
@@ -289,249 +228,254 @@ void hashedpad::send_token(name token_contract,
     ).send();
 }
 
-void hashedpad::claim(uint64_t campaign_id, name participant) {
-    require_auth(participant);
+void hashedpad::record_trade(uint64_t launch_id,
+                             name trader,
+                             bool is_buy,
+                             const asset& payment,
+                             const asset& tokens,
+                             uint64_t trade_id) {
+    trades trade_table(get_self(), launch_id);
 
-    campaigns table(get_self(), get_self().value);
-    const auto& campaign = table.get(campaign_id, "campaign does not exist");
-    check(campaign.status == STATUS_SUCCESS, "campaign is not successful");
-
-    contributions contribs(get_self(), campaign_id);
-    auto contribution = contribs.find(participant.value);
-    check(contribution != contribs.end(), "participant has no contribution");
-    check(!contribution->claimed, "tokens have already been claimed");
-    check(!contribution->refunded, "contribution was already refunded");
-    check(contribution->claimable.amount > 0, "participant has nothing to claim");
-
-    const asset amount = contribution->claimable;
-
-    contribs.modify(contribution, same_payer, [&](auto& row) {
-        row.claimed = true;
+    trade_table.emplace(get_self(), [&](auto& row) {
+        row.id = trade_id;
+        row.trader = trader;
+        row.is_buy = is_buy;
+        row.payment = payment;
+        row.tokens = tokens;
+        row.timestamp = now_seconds();
     });
-
-    send_token(
-        campaign.sale_contract,
-        participant,
-        amount,
-        string("Hashed launchpad claim #") + std::to_string(campaign_id)
-    );
-}
-
-void hashedpad::refund(uint64_t campaign_id, name participant) {
-    require_auth(participant);
-
-    campaigns table(get_self(), get_self().value);
-    const auto& campaign = table.get(campaign_id, "campaign does not exist");
-    check(
-        campaign.status == STATUS_FAILED || campaign.status == STATUS_CANCELLED,
-        "campaign is not refundable"
-    );
-
-    contributions contribs(get_self(), campaign_id);
-    auto contribution = contribs.find(participant.value);
-    check(contribution != contribs.end(), "participant has no contribution");
-    check(!contribution->refunded, "contribution has already been refunded");
-    check(!contribution->claimed, "tokens have already been claimed");
-    check(contribution->paid.amount > 0, "participant has nothing to refund");
-
-    const asset amount = contribution->paid;
-
-    contribs.modify(contribution, same_payer, [&](auto& row) {
-        row.refunded = true;
-    });
-
-    send_token(
-        campaign.payment_contract,
-        participant,
-        amount,
-        string("Hashed launchpad refund #") + std::to_string(campaign_id)
-    );
-}
-
-void hashedpad::withdraw(uint64_t campaign_id) {
-    campaigns table(get_self(), get_self().value);
-    auto campaign = table.find(campaign_id);
-    check(campaign != table.end(), "campaign does not exist");
-
-    require_auth(campaign->creator);
-    check(campaign->status == STATUS_SUCCESS, "campaign is not successful");
-    check(!campaign->proceeds_withdrawn, "campaign proceeds were already withdrawn");
-    check(campaign->raised.amount > 0, "campaign has no proceeds");
-
-    const asset raised = campaign->raised;
-    const uint16_t fee_bps = campaign->fee_bps;
-    const name fee_receiver = campaign->fee_receiver;
-
-    __int128 fee_calc =
-        static_cast<__int128>(raised.amount) * static_cast<__int128>(fee_bps);
-    const int64_t fee_amount = static_cast<int64_t>(fee_calc / 10000);
-    const int64_t creator_amount = raised.amount - fee_amount;
-
-    check(creator_amount >= 0, "invalid platform fee calculation");
-
-    table.modify(campaign, same_payer, [&](auto& row) {
-        row.proceeds_withdrawn = true;
-    });
-
-    if (fee_amount > 0) {
-        check(is_account(fee_receiver), "campaign fee receiver no longer exists");
-        send_token(
-            campaign->payment_contract,
-            fee_receiver,
-            asset{fee_amount, raised.symbol},
-            string("Hashed launchpad fee #") + std::to_string(campaign_id)
-        );
-    }
-
-    if (creator_amount > 0) {
-        send_token(
-            campaign->payment_contract,
-            campaign->creator,
-            asset{creator_amount, raised.symbol},
-            string("Hashed launchpad proceeds #") + std::to_string(campaign_id)
-        );
-    }
-}
-
-void hashedpad::reclaim(uint64_t campaign_id) {
-    campaigns table(get_self(), get_self().value);
-    auto campaign = table.find(campaign_id);
-    check(campaign != table.end(), "campaign does not exist");
-
-    require_auth(campaign->creator);
-    check(
-        campaign->status == STATUS_SUCCESS ||
-        campaign->status == STATUS_FAILED ||
-        campaign->status == STATUS_CANCELLED,
-        "campaign is not finalized or cancelled"
-    );
-    check(!campaign->sale_reclaimed, "sale token balance was already reclaimed");
-
-    asset amount{0, campaign->token_allocation.symbol};
-
-    if (campaign->status == STATUS_SUCCESS) {
-        amount = campaign->deposited - campaign->sold;
-    } else {
-        amount = campaign->deposited;
-    }
-
-    table.modify(campaign, same_payer, [&](auto& row) {
-        row.sale_reclaimed = true;
-    });
-
-    if (amount.amount > 0) {
-        send_token(
-            campaign->sale_contract,
-            campaign->creator,
-            amount,
-            string("Hashed launchpad reclaim #") + std::to_string(campaign_id)
-        );
-    }
 }
 
 void hashedpad::handle_deposit(name token_contract,
                                name from,
                                const asset& quantity,
                                const string& memo) {
-    const uint64_t campaign_id = parse_campaign_id(memo, "deposit:");
+    const uint64_t launch_id = parse_launch_id(memo, "deposit:");
 
-    campaigns table(get_self(), get_self().value);
-    auto campaign = table.find(campaign_id);
-    check(campaign != table.end(), "campaign does not exist");
+    launches table(get_self(), get_self().value);
+    auto launch_it = table.find(launch_id);
+    check(launch_it != table.end(), "meme launch does not exist");
 
-    check(campaign->status == STATUS_DRAFT, "campaign is not accepting token deposits");
-    check(from == campaign->creator, "only the campaign creator may deposit sale tokens");
-    check(token_contract == campaign->sale_contract, "wrong sale token contract");
-    check(quantity.symbol == campaign->token_allocation.symbol, "wrong sale token symbol");
-    check(quantity.amount > 0, "sale token deposit must be positive");
+    check(launch_it->status == STATUS_DRAFT, "meme launch is not awaiting token escrow");
+    check(from == launch_it->creator, "only the creator may escrow the meme supply");
+    check(token_contract == launch_it->sale_contract, "wrong sale token contract");
+    check(quantity.symbol == launch_it->sale_symbol, "wrong sale token symbol");
     check(
-        campaign->deposited.amount <= campaign->token_allocation.amount - quantity.amount,
-        "deposit exceeds campaign token allocation"
+        quantity == launch_it->token_allocation,
+        "deposit the entire fixed token supply to start the meme launch"
     );
 
-    table.modify(campaign, same_payer, [&](auto& row) {
-        row.deposited += quantity;
+    table.modify(launch_it, same_payer, [&](auto& row) {
+        row.token_reserve = quantity;
+        row.status = STATUS_LIVE;
     });
 }
 
-void hashedpad::handle_purchase(name token_contract,
-                                name from,
-                                const asset& quantity,
-                                const string& memo) {
-    const uint64_t campaign_id = parse_campaign_id(memo, "buy:");
+void hashedpad::handle_buy(name token_contract,
+                           name buyer,
+                           const asset& quantity,
+                           const string& memo) {
+    const uint64_t launch_id = parse_launch_id(memo, "buy:");
 
-    campaigns table(get_self(), get_self().value);
-    auto campaign = table.find(campaign_id);
-    check(campaign != table.end(), "campaign does not exist");
+    launches table(get_self(), get_self().value);
+    auto launch_it = table.find(launch_id);
+    check(launch_it != table.end(), "meme launch does not exist");
 
-    check(campaign->status == STATUS_ACTIVE, "campaign is not active");
-    check(token_contract == campaign->payment_contract, "wrong payment token contract");
-    check(quantity.symbol == campaign->payment_symbol, "wrong payment token symbol");
-    check(quantity.amount > 0, "contribution must be positive");
+    check(launch_it->status == STATUS_LIVE, "meme launch is not live");
+    check(token_contract == launch_it->payment_contract, "wrong payment token contract");
+    check(quantity.symbol == launch_it->payment_symbol, "wrong payment token symbol");
+    check(quantity.amount > 0, "buy amount must be positive");
+    check(launch_it->token_reserve.amount > 1, "bonding curve has no tokens left");
 
-    const uint32_t now = now_seconds();
-    check(now >= campaign->start_at, "campaign has not started");
-    check(now < campaign->end_at, "campaign has ended");
+    const int64_t protocol_fee =
+        static_cast<int64_t>(
+            static_cast<__int128>(quantity.amount) * launch_it->protocol_fee_bps / 10000
+        );
 
-    if (campaign->allowlist_enabled) {
-        allowlist list(get_self(), campaign_id);
-        check(list.find(from.value) != list.end(), "account is not allowlisted");
-    }
+    const int64_t creator_fee =
+        static_cast<int64_t>(
+            static_cast<__int128>(quantity.amount) * launch_it->creator_fee_bps / 10000
+        );
 
-    contributions contribs(get_self(), campaign_id);
-    auto contribution = contribs.find(from.value);
-    const int64_t prior_paid =
-        contribution == contribs.end() ? 0 : contribution->paid.amount;
+    const int64_t net_input = quantity.amount - protocol_fee - creator_fee;
+    check(net_input > 0, "buy amount is too small after fees");
+
+    const int64_t current_x =
+        launch_it->virtual_payment.amount + launch_it->payment_reserve.amount;
 
     check(
-        prior_paid <= campaign->max_contribution.amount - quantity.amount,
-        "participant maximum contribution exceeded"
+        current_x <= std::numeric_limits<int64_t>::max() - net_input,
+        "payment reserve overflow"
     );
 
-    if (prior_paid == 0) {
-        check(
-            quantity.amount >= campaign->min_contribution.amount,
-            "contribution is below campaign minimum"
+    const int64_t new_x = current_x + net_input;
+
+    const __int128 invariant =
+        static_cast<__int128>(launch_it->virtual_payment.amount) *
+        static_cast<__int128>(launch_it->token_allocation.amount);
+
+    const int64_t new_y = ceil_div_128(invariant, new_x);
+
+    check(new_y < launch_it->token_reserve.amount, "buy amount is too small for one token unit");
+
+    const int64_t token_output_amount =
+        launch_it->token_reserve.amount - new_y;
+
+    const asset token_output{token_output_amount, launch_it->sale_symbol};
+    const asset net_payment{net_input, launch_it->payment_symbol};
+
+    const uint64_t trade_id = launch_it->trade_count;
+
+    table.modify(launch_it, same_payer, [&](auto& row) {
+        row.token_reserve.amount = new_y;
+        row.payment_reserve += net_payment;
+        row.volume += quantity;
+        row.trade_count += 1;
+
+        if (!row.graduated &&
+            row.payment_reserve.amount >= row.graduation_target.amount) {
+            row.graduated = true;
+        }
+    });
+
+    record_trade(
+        launch_id,
+        buyer,
+        true,
+        quantity,
+        token_output,
+        trade_id
+    );
+
+    if (protocol_fee > 0) {
+        send_token(
+            launch_it->payment_contract,
+            launch_it->fee_receiver,
+            asset{protocol_fee, launch_it->payment_symbol},
+            string("Hashed meme protocol fee #") + std::to_string(launch_id)
         );
     }
 
-    check(
-        campaign->raised.amount <= campaign->hard_cap.amount - quantity.amount,
-        "campaign hard cap exceeded"
-    );
-
-    const asset sale_amount =
-        calculate_sale_amount(quantity, campaign->tokens_per_payment, campaign->payment_symbol.precision());
-
-    check(
-        campaign->sold.amount <= campaign->token_allocation.amount - sale_amount.amount,
-        "campaign sale allocation exceeded"
-    );
-
-    if (contribution == contribs.end()) {
-        // Notification handlers cannot bill the transfer sender for RAM on
-        // Antelope/Ultra. The launchpad sponsors the participant row instead.
-        contribs.emplace(get_self(), [&](auto& row) {
-            row.account = from;
-            row.paid = quantity;
-            row.claimable = sale_amount;
-            row.claimed = false;
-            row.refunded = false;
-        });
-    } else {
-        check(!contribution->claimed && !contribution->refunded,
-              "participant contribution is already settled");
-
-        contribs.modify(contribution, same_payer, [&](auto& row) {
-            row.paid += quantity;
-            row.claimable += sale_amount;
-        });
+    if (creator_fee > 0) {
+        send_token(
+            launch_it->payment_contract,
+            launch_it->creator,
+            asset{creator_fee, launch_it->payment_symbol},
+            string("Hashed meme creator fee #") + std::to_string(launch_id)
+        );
     }
 
-    table.modify(campaign, same_payer, [&](auto& row) {
-        row.raised += quantity;
-        row.sold += sale_amount;
+    send_token(
+        launch_it->sale_contract,
+        buyer,
+        token_output,
+        string("Hashed meme buy #") + std::to_string(launch_id)
+    );
+}
+
+void hashedpad::handle_sell(name token_contract,
+                            name seller,
+                            const asset& quantity,
+                            const string& memo) {
+    const uint64_t launch_id = parse_launch_id(memo, "sell:");
+
+    launches table(get_self(), get_self().value);
+    auto launch_it = table.find(launch_id);
+    check(launch_it != table.end(), "meme launch does not exist");
+
+    check(launch_it->status == STATUS_LIVE, "meme launch is not live");
+    check(token_contract == launch_it->sale_contract, "wrong sale token contract");
+    check(quantity.symbol == launch_it->sale_symbol, "wrong sale token symbol");
+    check(quantity.amount > 0, "sell amount must be positive");
+
+    check(
+        quantity.amount <= launch_it->token_allocation.amount - launch_it->token_reserve.amount,
+        "cannot sell more tokens than the bonding curve has released"
+    );
+
+    check(
+        launch_it->token_reserve.amount <=
+            launch_it->token_allocation.amount - quantity.amount,
+        "sell would exceed the original fixed token supply"
+    );
+
+    const int64_t new_y = launch_it->token_reserve.amount + quantity.amount;
+
+    const __int128 invariant =
+        static_cast<__int128>(launch_it->virtual_payment.amount) *
+        static_cast<__int128>(launch_it->token_allocation.amount);
+
+    const int64_t new_x = ceil_div_128(invariant, new_y);
+
+    const int64_t current_x =
+        launch_it->virtual_payment.amount + launch_it->payment_reserve.amount;
+
+    check(new_x < current_x, "sell amount is too small for payment output");
+
+    const int64_t gross_output = current_x - new_x;
+    check(gross_output > 0, "sell output must be positive");
+    check(
+        gross_output <= launch_it->payment_reserve.amount,
+        "bonding curve payment reserve is insufficient"
+    );
+
+    const int64_t protocol_fee =
+        static_cast<int64_t>(
+            static_cast<__int128>(gross_output) * launch_it->protocol_fee_bps / 10000
+        );
+
+    const int64_t creator_fee =
+        static_cast<int64_t>(
+            static_cast<__int128>(gross_output) * launch_it->creator_fee_bps / 10000
+        );
+
+    const int64_t net_output = gross_output - protocol_fee - creator_fee;
+    check(net_output > 0, "sell output is too small after fees");
+
+    const asset gross_payment{gross_output, launch_it->payment_symbol};
+    const asset net_payment{net_output, launch_it->payment_symbol};
+    const uint64_t trade_id = launch_it->trade_count;
+
+    table.modify(launch_it, same_payer, [&](auto& row) {
+        row.token_reserve += quantity;
+        row.payment_reserve -= gross_payment;
+        row.volume += gross_payment;
+        row.trade_count += 1;
     });
+
+    record_trade(
+        launch_id,
+        seller,
+        false,
+        gross_payment,
+        quantity,
+        trade_id
+    );
+
+    send_token(
+        launch_it->payment_contract,
+        seller,
+        net_payment,
+        string("Hashed meme sell #") + std::to_string(launch_id)
+    );
+
+    if (protocol_fee > 0) {
+        send_token(
+            launch_it->payment_contract,
+            launch_it->fee_receiver,
+            asset{protocol_fee, launch_it->payment_symbol},
+            string("Hashed meme protocol fee #") + std::to_string(launch_id)
+        );
+    }
+
+    if (creator_fee > 0) {
+        send_token(
+            launch_it->payment_contract,
+            launch_it->creator,
+            asset{creator_fee, launch_it->payment_symbol},
+            string("Hashed meme creator fee #") + std::to_string(launch_id)
+        );
+    }
 }
 
 void hashedpad::ontransfer(name from, name to, asset quantity, string memo) {
@@ -551,9 +495,17 @@ void hashedpad::ontransfer(name from, name to, asset quantity, string memo) {
     }
 
     if (memo.rfind("buy:", 0) == 0) {
-        handle_purchase(token_contract, from, quantity, memo);
+        handle_buy(token_contract, from, quantity, memo);
         return;
     }
 
-    check(false, "launchpad transfer memo must be deposit:<campaign_id> or buy:<campaign_id>");
+    if (memo.rfind("sell:", 0) == 0) {
+        handle_sell(token_contract, from, quantity, memo);
+        return;
+    }
+
+    check(
+        false,
+        "meme launch transfer memo must be deposit:<id>, buy:<id>, or sell:<id>"
+    );
 }
