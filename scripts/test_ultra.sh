@@ -44,7 +44,14 @@ ls -lh "$BUILD_DIR/hashedlaunch.wasm" "$BUILD_DIR/hashedlaunch.abi"
 
 echo "==> Running Ultra integration tests"
 cd "$ROOT_DIR"
-ultratest -t "$ROOT_DIR/tests/launcher.ultra_test.js"
+
+# UltraTest asks where to store temporary files on first use.
+# In CI/non-interactive shells accept its documented default by sending Enter.
+if [[ -t 0 ]]; then
+  ultratest -t "$ROOT_DIR/tests/launcher.ultra_test.js"
+else
+  printf '\n' | ultratest -t "$ROOT_DIR/tests/launcher.ultra_test.js"
+fi
 
 echo
 echo "PASS: create -> mint -> transfer -> burn -> duplicate-symbol protection"
