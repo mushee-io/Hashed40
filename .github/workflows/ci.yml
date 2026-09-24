@@ -15,14 +15,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Ultra runtime diagnostics
-        run: |
-          echo "PATH=$PATH"
-          which -a node || true
-          node --version || true
-          which ultratest
-          head -1 "$(which ultratest)" || true
-          ls -la /usr/bin/node* /usr/local/bin/node* /opt/node* 2>/dev/null || true
+      # Ultra's current 3rdparty-devtools:latest image ships Node 22, while the
+      # bundled ultratest/esm runtime currently crashes on Node 22. Use Node 18
+      # for ultratest until the upstream image updates that dependency.
+      - name: Node 18 for UltraTest compatibility
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
 
       - name: Compile and test on Ultra local chain
         run: bash scripts/test_ultra.sh
