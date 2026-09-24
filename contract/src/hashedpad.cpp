@@ -314,19 +314,31 @@ void hashedpad::handle_buy(name token_contract,
     check(quantity.amount > 0, "buy amount must be positive");
     check(market_it->sold.amount < market_it->token_allocation.amount, "market token allocation is sold out");
 
-    const int64_t fee = fee_amount(quantity.amount, market_it->fee_bps);
-    const int64_t budget = quantity.amount - fee;
+    // Use a conservative net budget to select token output, then charge the
+    // protocol fee only on the curve cost actually consumed. Any unused UOS is
+    // returned to the buyer rather than becoming accidental creator proceeds.
+    const int64_t max_fee = fee_amount(quantity.amount, market_it->fee_bps);
+    const int64_t budget = quantity.amount - max_fee;
     check(budget > 0, "buy amount is too small after fee");
 
     const int64_t token_amount = tokens_for_budget(*market_it, budget);
     check(token_amount > 0, "buy amount is too small for the current curve price");
 
     const asset tokens_out{token_amount, market_it->token_symbol};
+    const asset exact_cost =
+        curve_cost(*market_it, market_it->sold.amount, market_it->sold.amount + token_amount);
+    check(exact_cost.amount > 0, "buy amount is too small for the current curve price");
+
+    const int64_t fee = fee_amount(exact_cost.amount, market_it->fee_bps);
+    const int64_t used = exact_cost.amount + fee;
+    check(used <= quantity.amount, "internal buy cost exceeds transferred amount");
+
+    const int64_t refund = quantity.amount - used;
 
     table.modify(market_it, same_payer, [&](auto& row) {
         row.sold += tokens_out;
-        row.reserve.amount += budget;
-        row.volume += quantity;
+        row.reserve += exact_cost;
+        row.volume.amount += used;
 
         if (
             row.reserve.amount >= row.graduation_target.amount ||
@@ -344,6 +356,15 @@ void hashedpad::handle_buy(name token_contract,
             market_it->fee_receiver,
             asset{fee, market_it->payment_symbol},
             string("Hashed launch fee #") + std::to_string(market_id)
+        );
+    }
+
+    if (refund > 0) {
+        send_token(
+            market_it->payment_contract,
+            from,
+            asset{refund, market_it->payment_symbol},
+            string("Hashed unused buy amount #") + std::to_string(market_id)
         );
     }
 
