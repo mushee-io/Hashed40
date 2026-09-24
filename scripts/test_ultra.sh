@@ -17,41 +17,54 @@ command -v ultratest >/dev/null 2>&1 || {
   exit 1
 }
 
-echo "==> Compiling hashedlaunch"
+compile_contract() {
+  local contract_name="$1"
+  local source_file="$2"
+
+  echo "==> Compiling $contract_name"
+  cd "$CONTRACT_DIR"
+
+  cdt-cpp     -abigen     -I "$CONTRACT_DIR/include"     -contract "$contract_name"     -o "$BUILD_DIR/$contract_name.wasm"     "$source_file"
+
+  if [[ -f "$CONTRACT_DIR/$contract_name.abi" && ! -f "$BUILD_DIR/$contract_name.abi" ]]; then
+    mv "$CONTRACT_DIR/$contract_name.abi" "$BUILD_DIR/$contract_name.abi"
+  fi
+
+  test -s "$BUILD_DIR/$contract_name.wasm" || {
+    echo "ERROR: $contract_name WASM was not generated."
+    exit 1
+  }
+
+  test -s "$BUILD_DIR/$contract_name.abi" || {
+    echo "ERROR: $contract_name ABI was not generated."
+    exit 1
+  }
+}
+
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 
-cd "$CONTRACT_DIR"
-cdt-cpp   -abigen   -I "$CONTRACT_DIR/include"   -contract hashedlaunch   -o "$BUILD_DIR/hashedlaunch.wasm"   "$CONTRACT_DIR/src/hashedlaunch.cpp"
-
-# Depending on CDT packaging, the ABI may be emitted beside the source or output.
-if [[ -f "$CONTRACT_DIR/hashedlaunch.abi" && ! -f "$BUILD_DIR/hashedlaunch.abi" ]]; then
-  mv "$CONTRACT_DIR/hashedlaunch.abi" "$BUILD_DIR/hashedlaunch.abi"
-fi
-
-test -s "$BUILD_DIR/hashedlaunch.wasm" || {
-  echo "ERROR: WASM was not generated."
-  exit 1
-}
-
-test -s "$BUILD_DIR/hashedlaunch.abi" || {
-  echo "ERROR: ABI was not generated."
-  exit 1
-}
+compile_contract hashedlaunch "$CONTRACT_DIR/src/hashedlaunch.cpp"
+compile_contract hashedpad "$CONTRACT_DIR/src/hashedpad.cpp"
 
 echo "==> Contract artifacts"
-ls -lh "$BUILD_DIR/hashedlaunch.wasm" "$BUILD_DIR/hashedlaunch.abi"
+ls -lh   "$BUILD_DIR/hashedlaunch.wasm" "$BUILD_DIR/hashedlaunch.abi"   "$BUILD_DIR/hashedpad.wasm" "$BUILD_DIR/hashedpad.abi"
 
-echo "==> Running Ultra integration tests"
-cd "$ROOT_DIR"
+run_ultratest() {
+  local test_file="$1"
 
-# UltraTest asks where to store temporary files on first use.
-# In CI/non-interactive shells accept its documented default by sending Enter.
-if [[ -t 0 ]]; then
-  ultratest -t "$ROOT_DIR/tests/launcher.ultra_test.js"
-else
-  printf '\n' | ultratest -t "$ROOT_DIR/tests/launcher.ultra_test.js"
-fi
+  echo "==> Running Ultra integration test: $test_file"
+  cd "$ROOT_DIR"
+
+  if [[ -t 0 ]]; then
+    ultratest -t "$ROOT_DIR/tests/$test_file"
+  else
+    printf '\n' | ultratest -t "$ROOT_DIR/tests/$test_file"
+  fi
+}
+
+run_ultratest launcher.ultra_test.js
+run_ultratest launchpad.ultra_test.js
 
 echo
-echo "PASS: create -> mint -> transfer -> burn -> duplicate-symbol protection"
+echo "PASS: Token Launcher + Launchpad integration suite"
