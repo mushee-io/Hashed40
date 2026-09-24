@@ -1,45 +1,24 @@
 # Hashed — Ultra Token Launcher + Launchpad
 
-Hashed is focused on exactly two products on Ultra: **Token Launcher** and **Launchpad**. The Token Launcher creates and manages native Ultra fungible tokens. The Launchpad will let projects configure and run token launches/sales for those tokens. The DEX and lending protocol are separate projects and are intentionally out of scope for this repository.
+Hashed is an Ultra-native **Token Launcher + Launchpad**.
 
-## Product scope
+The scope of this repository is intentionally limited to two products:
 
-### 1. Token Launcher — working MVP
+1. **Token Launcher** — create and manage native fungible tokens on Ultra.
+2. **Launchpad** — escrow those tokens, raise UOS, finalize the launch, distribute purchased tokens, and refund contributors when a launch fails.
 
-- Native Ultra C++ / WASM smart contract
-- One-transaction `launch` action
-- Configurable symbol, precision, maximum supply, and initial supply
-- Issuer-controlled minting
-- Burning with `retire`
-- Standard token transfers
-- Token metadata
-- Ultra Wallet SDK Testnet frontend
-- Local Ultra integration tests using `ultratest`
+DEX and lending functionality are separate projects and are not part of Hashed40.
 
-### 2. Launchpad — next build target
+## Token Launcher
 
-- Create a launch campaign for a token created through Hashed
-- Configure sale allocation and tokens available for sale
-- Set start/end time
-- Set minimum and maximum contribution
-- Set soft cap and hard cap
-- Configure public or allowlisted participation
-- Accept UOS contributions
-- Finalize successful campaigns
-- Refund contributors when campaign conditions are not met
-- Claim purchased tokens after a successful launch
-- Team / treasury allocation and vesting support
-- Platform launch fee and campaign accounting
-- Campaign status, contribution, and claim views in the frontend
+The launcher is an eosio.token-style C++ / WASM contract deployed under a Hashed-controlled Ultra account.
 
-**Out of scope:** DEX, swaps, AMM pools, lending, borrowing, and lending-market oracles.
-
-## Token Launcher contract actions
+### Actions
 
 | Action | Purpose | Authorization |
 |---|---|---|
-| `launch` | Create a token and optionally mint its initial supply atomically | issuer |
-| `create` | Create a token without minting | issuer |
+| `launch` | Create a token and issue its initial supply atomically | issuer |
+| `create` | Create a token without issuing supply | issuer |
 | `issue` | Mint additional supply up to the maximum | token issuer |
 | `retire` | Burn issuer-held supply | token issuer |
 | `transfer` | Transfer tokens | sender |
@@ -47,165 +26,163 @@ Hashed is focused on exactly two products on Ultra: **Token Launcher** and **Lau
 | `close` | Remove an empty balance row | owner |
 | `setmeta` | Update token name / metadata URI | token issuer |
 
-A token is identified by **launcher contract + symbol**, following the Antelope token model.
+The launcher enforces maximum supply, symbol/precision consistency, issuer-only minting, positive transfers, issuer-only metadata updates, and one token per symbol under the launcher contract.
 
-## Architecture
+## Launchpad
 
-Ultra's deployed system `eosio.token` contract is not being modified. Hashed deploys its own eosio.token-style contract and allows the token issuer to authorize token creation through that contract.
+The launchpad is a separate Ultra contract that is explicitly connected to the configured Hashed Token Launcher.
 
-The launcher enforces:
+A campaign creator:
 
-- maximum supply
-- symbol/precision consistency
-- issuer-only minting
-- positive transfer quantities
-- issuer-only metadata updates
-- one token per symbol under the launcher contract
+1. creates a token through Hashed;
+2. creates a launch campaign;
+3. deposits the campaign's token allocation into the launchpad escrow using `deposit:<campaign_id>`;
+4. activates the campaign;
+5. contributors send UOS using `buy:<campaign_id>`;
+6. the campaign finalizes after the end time or when the hard cap is reached;
+7. successful contributors claim purchased tokens;
+8. successful creators withdraw proceeds and reclaim unsold tokens;
+9. failed campaigns let contributors claim refunds and creators reclaim the escrowed sale tokens.
 
-## Fastest local test
+### Launchpad actions
 
-Ultra's official developer image contains `cdt-cpp`, `cleos`, `nodeos`, `keosd`, and `ultratest`.
+| Action | Purpose | Authorization |
+|---|---|---|
+| `setconfig` | Configure trusted launcher, payment asset and platform fee | launchpad account |
+| `createcamp` | Create a launch campaign | creator |
+| `setallow` | Add/remove an account from an allowlisted campaign | creator |
+| `activate` | Activate after the full token allocation is escrowed | creator |
+| `cancel` | Cancel a draft or unfunded active campaign | creator |
+| `finalize` | Set a completed campaign to success or failure | anyone |
+| `claim` | Claim purchased sale tokens | participant |
+| `refund` | Recover payment from a failed/cancelled campaign | participant |
+| `withdraw` | Withdraw successful campaign proceeds | creator |
+| `reclaim` | Recover unsold or failed-campaign sale tokens | creator |
 
-### 1. Clone into your Ultra work directory
+### Campaign controls
 
-Linux / WSL:
+Each campaign snapshots:
+
+- sale token contract and symbol
+- token allocation
+- payment contract and payment symbol
+- tokens received per payment unit
+- start/end timestamps
+- soft cap and hard cap
+- minimum and maximum contribution
+- optional allowlist
+- platform fee receiver and fee basis points
+- amount raised, amount sold, escrowed amount and campaign status
+
+The contract rejects purchases before the start time, after the end time, above the hard cap, above the participant maximum, from non-allowlisted accounts when allowlisting is enabled, or when the escrow cannot satisfy the purchase.
+
+### Trust boundary
+
+The launchpad has a contract-level configuration for the trusted Hashed launcher and accepted payment asset. New campaigns cannot point at an arbitrary sale-token contract or arbitrary payment contract.
+
+For Ultra Testnet the intended production configuration is:
+
+- launcher contract: the deployed Hashed Token Launcher account
+- payment contract: `eosio.token`
+- payment symbol: `8,UOS`
+
+The local integration suite uses `TUOS` issued by the Hashed launcher so the complete flow can be tested without relying on the public faucet.
+
+## Local Ultra test
+
+Ultra's official developer image includes the C++ contract toolchain and `ultratest`.
 
 ```bash
 mkdir -p ~/ultra_workdir
 cd ~/ultra_workdir
 git clone https://github.com/mushee-io/Hashed40.git
 cd Hashed40
-```
 
-### 2. Pull and start Ultra's developer container
-
-```bash
 docker pull quay.io/ultra.io/3rdparty-devtools:latest
-```
 
-If you do not already have the `ultra` container:
-
-```bash
 docker run -dit \
   --name ultra \
   -p 8888:8888 \
   -p 9876:9876 \
   -v ~/ultra_workdir:/opt/ultra_workdir \
   quay.io/ultra.io/3rdparty-devtools:latest
-```
 
-Enter it:
-
-```bash
 docker start ultra
 docker exec -it ultra /bin/bash
 ```
 
-### 3. Compile + run the complete token test
-
-Inside the Ultra container:
+Inside the container:
 
 ```bash
 cd /opt/ultra_workdir/Hashed40
 bash scripts/test_ultra.sh
 ```
 
-That script:
+The integration suite compiles both contracts and exercises:
 
-1. compiles `hashedlaunch.cpp` with Ultra's `cdt-cpp`
-2. generates `hashedlaunch.wasm`
-3. generates `hashedlaunch.abi`
-4. boots an Ultra test environment with `ultratest`
-5. deploys the contract
-6. creates `HASH`
-7. mints `500,000 HASH`
-8. transfers `25 HASH`
-9. issues additional supply
-10. burns supply
-11. verifies duplicate-symbol protection
+- token creation
+- minting
+- token transfers
+- burning
+- duplicate-symbol rejection
+- launchpad contract deployment
+- campaign creation
+- token escrow
+- campaign activation
+- multiple contributions
+- token allocation math
+- hard-cap finalization
+- successful token claims
+- platform-fee accounting
+- creator proceeds
+- unsold-token reclaim
+- failed-launch finalization
+- contributor refunds
 
-A successful run ends with:
-
-```text
-PASS: create -> mint -> transfer -> burn -> duplicate-symbol protection
-```
-
-## Compile only
-
-Inside Ultra's developer container:
+Compile without running tests:
 
 ```bash
-cd /opt/ultra_workdir/Hashed40
 bash scripts/compile_ultra.sh
 ```
 
-Artifacts are written to:
+Artifacts:
 
 ```text
 contract/build/hashedlaunch.wasm
 contract/build/hashedlaunch.abi
+contract/build/hashedpad.wasm
+contract/build/hashedpad.abi
 ```
 
-## Manual local deployment
+## Launchpad inline-transfer permission
 
-If you want a persistent local chain instead of the automated test runner:
+Claims, refunds, fee payments, proceeds and token reclaims are inline transfers initiated by the launchpad contract.
 
-```bash
-ultratest -D -n -s
+The deployed launchpad account therefore needs its own `eosio.code` permission included in `active`. This is standard Antelope contract authorization for inline actions.
+
+Do this only with the actual launchpad account and its actual public key. Never commit or paste a private key into the repository.
+
+## Configure the launchpad
+
+After both contracts are deployed, configure the launchpad using the actual deployment accounts.
+
+Conceptually:
+
+```text
+setconfig(
+  <HASHED_LAUNCHER_ACCOUNT>,
+  eosio.token,
+  8,UOS,
+  <HASHED_FEE_RECEIVER>,
+  <FEE_BPS>
+)
 ```
 
-In another shell inside the container:
+The contract caps the platform fee at 1,000 basis points (10%). Existing campaigns snapshot their fee settings, so a later configuration change does not alter the economics of campaigns already created.
 
-```bash
-cleos get info
-```
+## Frontend
 
-Create/import a local key and create the deployment accounts as needed, then deploy:
-
-```bash
-cleos set contract hashedlaunch \
-  /opt/ultra_workdir/Hashed40/contract/build \
-  hashedlaunch.wasm \
-  hashedlaunch.abi \
-  -p hashedlaunch@active
-```
-
-If the local environment reports that the deployment account has no KYC info, Ultra's local-development documentation provides:
-
-```bash
-cleos push action eosio.kyc togglekyc '[]' -p ultra.kyc
-```
-
-Then retry deployment.
-
-## Launch HASH manually
-
-```bash
-cleos push action hashedlaunch launch \
-'["hashcreator","1000000.00000000 HASH","500000.00000000 HASH","Hashed Test Token","https://example.com/hash.json"]' \
--p hashcreator@active
-```
-
-Verify:
-
-```bash
-cleos get currency stats hashedlaunch HASH
-cleos get currency balance hashedlaunch hashcreator HASH
-```
-
-Transfer:
-
-```bash
-cleos push action hashedlaunch transfer \
-'["hashcreator","receiveracct","25.00000000 HASH","Hashed launcher test"]' \
--p hashcreator@active
-```
-
-## Web launcher
-
-The frontend uses `@ultraos/wallet-sdk@^0.6.1` and targets **Ultra Testnet**.
-
-Ultra's browser extension only injects its wallet API into HTTPS pages. The project therefore uses `@vitejs/plugin-basic-ssl` so local development runs over HTTPS.
+The frontend provides two tabs: **Token Launcher** and **Launchpad**.
 
 ```bash
 cd web
@@ -214,55 +191,64 @@ npm install
 npm run dev
 ```
 
-Open the HTTPS URL printed by Vite and accept the local development certificate warning.
-
-Set:
+Environment variables:
 
 ```env
-VITE_CONTRACT_ACCOUNT=<your Ultra Testnet contract account>
+VITE_CONTRACT_ACCOUNT=<HASHED_TOKEN_LAUNCHER_ACCOUNT>
+VITE_LAUNCHPAD_ACCOUNT=<HASHED_LAUNCHPAD_ACCOUNT>
+VITE_PAYMENT_CONTRACT=eosio.token
+VITE_PAYMENT_SYMBOL=UOS
+VITE_PAYMENT_DECIMALS=8
+VITE_ULTRA_RPC_URL=https://test.ultra.eosusa.io
 ```
 
-before using the public Testnet build.
+The frontend uses the Ultra Wallet SDK, targets Ultra Testnet, and uses string/BigInt asset parsing to avoid JavaScript floating-point rounding in token amounts.
 
-The frontend deliberately uses string/BigInt amount parsing rather than JavaScript floating-point arithmetic, so large token supplies and fixed precision are not silently rounded.
+## Public Ultra Testnet deployment
 
-## Public Ultra Testnet
+Once Ultra provides a funded Testnet developer account/resource access:
 
-Once a funded Ultra developer Testnet account is available:
+1. compile both WASM/ABI pairs;
+2. deploy `hashedlaunch`;
+3. deploy `hashedpad`;
+4. add `hashedpad@eosio.code` to the launchpad account's active authority;
+5. call `setconfig` with the launcher account and `eosio.token / 8,UOS`;
+6. configure the frontend environment variables;
+7. create a real Testnet token with the launcher;
+8. create a campaign for that token;
+9. escrow the allocation;
+10. activate, contribute with Testnet UOS, finalize and claim/refund;
+11. verify all transactions and table state on the Ultra Testnet explorer.
 
-1. compile the WASM/ABI
-2. deploy both artifacts to the generated Ultra developer account
-3. set `VITE_CONTRACT_ACCOUNT` to that account
-4. connect the Ultra Wallet extension on Testnet
-5. launch a test token
-6. verify the transaction and token tables on the Ultra Testnet explorer
-
-Ultra developer account names on Testnet/Mainnet are generated by Ultra; do not assume the deployment account will literally be named `hashedlaunch`.
+Ultra developer account names may be generated by Ultra. Do not assume the public deployment accounts will literally be named `hashedlaunch` and `hashedpad`.
 
 ## Security status
 
-This is an MVP and is **not audited for Mainnet**.
+This is a working testnet/local-chain implementation, not an audited Mainnet release.
 
 Before Mainnet:
 
-1. independent smart-contract audit
-2. fuzz/property tests for supply and balance invariants
-3. token-launcher fee / anti-spam policy
-4. production RAM/resource sponsorship model
-5. token metadata/indexing standard
-6. launchpad sale contract
-7. contribution caps and campaign-state tests
-8. success/failure finalization and refund tests
-9. token claim and vesting contracts
-10. launchpad fee accounting and security review
+- independent smart-contract audit
+- fuzz/property testing of supply and escrow invariants
+- RAM/resource model review for participant rows
+- campaign-state transition review
+- price/rate rounding review
+- platform fee and authority review
+- production metadata/indexing
+- vesting support if required by launches
+- public Testnet soak testing
 
 ## Repository structure
 
 ```text
 contract/
   CMakeLists.txt
-  include/hashedlaunch/hashedlaunch.hpp
-  src/hashedlaunch.cpp
+  include/
+    hashedlaunch/hashedlaunch.hpp
+    hashedpad/hashedpad.hpp
+  src/
+    hashedlaunch.cpp
+    hashedpad.cpp
 
 scripts/
   compile_ultra.sh
@@ -271,6 +257,7 @@ scripts/
 
 tests/
   launcher.ultra_test.js
+  launchpad.ultra_test.js
 
 web/
   src/main.ts
